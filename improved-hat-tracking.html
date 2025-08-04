@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Improved MediaPipe FaceMesh with 3D Hat Tracking</title>
+  <!-- MediaPipe Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <!-- Three.js and GLTFLoader Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134/examples/js/loaders/GLTFLoader.js"></script>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font-family: Arial, sans-serif;
+    }
+    #output_canvas { position: absolute; top: 0; left: 0; }
+    #three_canvas { position: absolute; top: 0; left: 0; }
+    #controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+    #controls label {
+      display: block;
+      margin: 5px 0;
+    }
+    #debug-info {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <video class="input_video" style="display: none;"></video>
+    <canvas class="output_canvas" width="1280px" height="720px"></canvas>
+    <canvas id="three_canvas" width="1280px" height="720px"></canvas>
+  </div>
+  
+  <div id="controls">
+    <h4>Điều chỉnh Tracking</h4>
+    <label>
+      Smoothing Factor: <input type="range" id="smoothing" min="0.01" max="0.3" step="0.01" value="0.1">
+      <span id="smoothing-value">0.1</span>
+    </label>
+    <label>
+      X Rotation Scale: <input type="range" id="x-scale" min="0.1" max="2.0" step="0.1" value="0.8">
+      <span id="x-scale-value">0.8</span>
+    </label>
+    <label>
+      Y Rotation Scale: <input type="range" id="y-scale" min="0.1" max="2.0" step="0.1" value="0.5">
+      <span id="y-scale-value">0.5</span>
+    </label>
+         <label>
+       Z Rotation Scale: <input type="range" id="z-scale" min="0.1" max="2.0" step="0.1" value="0.3">
+       <span id="z-scale-value">0.3</span>
+     </label>
+     <label>
+       Scale Multiplier: <input type="range" id="scale-mult" min="0.1" max="5.0" step="0.1" value="2.5">
+       <span id="scale-mult-value">2.5</span>
+     </label>
+     <label>
+       Y Position Offset: <input type="range" id="y-offset" min="0.1" max="1.0" step="0.05" value="0.4">
+       <span id="y-offset-value">0.4</span>
+     </label>
+     <label>
+       <input type="checkbox" id="show-debug" checked> Hiển thị Debug Info
+     </label>
+  </div>
+
+     <div id="debug-info" style="display: none;">
+     <div>Rotation X: <span id="rot-x">0.00</span></div>
+     <div>Rotation Y: <span id="rot-y">0.00</span></div>
+     <div>Rotation Z: <span id="rot-z">0.00</span></div>
+     <div>Position X: <span id="pos-x">0.00</span></div>
+     <div>Position Y: <span id="pos-y">0.00</span></div>
+     <div>Position Z: <span id="pos-z">0.00</span></div>
+     <div>Head Width: <span id="head-width">0.00</span></div>
+     <div>Head Height: <span id="head-height">0.00</span></div>
+     <div>Scale: <span id="hat-scale">0.00</span></div>
+   </div>
+
+  <script type="module">
+    // MediaPipe Setup
+    const videoElement = document.getElementsByClassName('input_video')[0];
+    const canvasElement = document.getElementsByClassName('output_canvas')[0];
+    const canvasCtx = canvasElement.getContext('2d');
+
+    // Three.js Setup
+    const threeCanvas = document.getElementById('three_canvas');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1280 / 720, 0.1, 1000);
+    camera.position.z = 5;
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+    renderer.setSize(1280, 720);
+
+    // Add ambient light
+    const light = new THREE.AmbientLight(0xffffff);
+    scene.add(light);
+
+         // Smoothing variables for rotation
+     let currentRotation = { x: 0, y: 0, z: 0 };
+     let targetRotation = { x: 0, y: 0, z: 0 };
+     let smoothingFactor = 0.1;
+     let rotationScales = { x: 0.8, y: 0.5, z: 0.3 };
+     let scaleMultiplier = 2.5;
+     let yPositionOffset = 0.4;
+
+         // Load the low-poly hat model
+     const loader = new THREE.GLTFLoader();
+     let hatModel;
+     loader.load(
+       'assets/low_poly_hat/hat.gltf',
+       (gltf) => {
+         hatModel = gltf.scene;
+         hatModel.scale.set(0.3, 0.3, 0.3); // Smaller scale for baseball cap
+         hatModel.rotation.set(0, 0, 0);
+         scene.add(hatModel);
+       },
+       (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
+       (error) => console.error('Error loading GLTF model:', error)
+     );
+
+     // Function to calculate head size and position from landmarks
+     function calculateHeadFit(landmarks) {
+       // Get key landmarks for head size calculation
+       const leftEar = landmarks[234]; // Left ear
+       const rightEar = landmarks[454]; // Right ear
+       const leftEye = landmarks[33]; // Left eye
+       const rightEye = landmarks[263]; // Right eye
+       const nose = landmarks[1]; // Nose tip
+       const chin = landmarks[152]; // Chin
+       const forehead = landmarks[10]; // Forehead
+
+       // Calculate head width (ear to ear)
+       const headWidth = Math.abs(leftEar.x - rightEar.x);
+       
+       // Calculate head height (forehead to chin)
+       const headHeight = Math.abs(forehead.y - chin.y);
+       
+       // Calculate head depth (using z-coordinates)
+       const headDepth = Math.abs(leftEar.z - rightEar.z);
+       
+       // Calculate forehead position (using forehead landmark directly)
+       const foreheadX = forehead.x;
+       const foreheadY = forehead.y;
+       const foreheadZ = forehead.z;
+
+       return {
+         width: headWidth,
+         height: headHeight,
+         depth: headDepth,
+         center: { x: foreheadX, y: foreheadY, z: foreheadZ },
+         // Calculate scale factor based on head size
+         scale: Math.min(headWidth, headHeight) * scaleMultiplier
+       };
+     }
+
+    // Function to calculate head rotation from landmarks
+    function calculateHeadRotation(landmarks) {
+      // Get key landmarks for head rotation calculation
+      const nose = landmarks[1]; // Nose tip
+      const leftEye = landmarks[33]; // Left eye
+      const rightEye = landmarks[263]; // Right eye
+      const leftEar = landmarks[234]; // Left ear
+      const rightEar = landmarks[454]; // Right ear
+
+      // Calculate head rotation around Y-axis (left-right)
+      const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+      const earCenterX = (leftEar.x + rightEar.x) / 2;
+      const headWidth = Math.abs(leftEar.x - rightEar.x);
+      const yRotation = Math.atan2(eyeCenterX - earCenterX, headWidth * 0.3) * rotationScales.y;
+
+      // Calculate head rotation around X-axis (up-down)
+      const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+      const noseY = nose.y;
+      const headHeight = Math.abs(leftEye.y - nose.y) * 2;
+      const xRotation = Math.atan2(noseY - eyeCenterY, headHeight * 0.5) * rotationScales.x;
+
+      // Calculate head rotation around Z-axis (tilt)
+      const leftEyeY = leftEye.y;
+      const rightEyeY = rightEye.y;
+      const eyeDistance = Math.abs(leftEye.x - rightEye.x);
+      const zRotation = Math.atan2(rightEyeY - leftEyeY, eyeDistance) * rotationScales.z;
+
+      return { x: xRotation, y: yRotation, z: zRotation };
+    }
+
+    // Function to apply smoothing to rotation
+    function smoothRotation(target, current, factor) {
+      return {
+        x: current.x + (target.x - current.x) * factor,
+        y: current.y + (target.y - current.y) * factor,
+        z: current.z + (target.z - current.z) * factor
+      };
+    }
+
+    // MediaPipe FaceMesh Configuration
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      }
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    // Process FaceMesh results
+    faceMesh.onResults((results) => {
+      // Clear the 2D canvas
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiFaceLandmarks) {
+        for (const landmarks of results.multiFaceLandmarks) {
+                     // Draw face mesh (optional, for visualization) - make it more subtle
+           drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#C0C0C030', lineWidth: 0.5 });
+
+                     // Calculate head fit and position
+           const headFit = calculateHeadFit(landmarks);
+           
+           // Map forehead position to Three.js coordinate system with better scaling
+           const threeX = (headFit.center.x * 1280 - 640) / 1280 * 3; // Reduced scale factor
+           const threeY = -(headFit.center.y * 720 - 360) / 720 * 3; // Reduced scale factor
+           const threeZ = -headFit.center.z * 1000 / 200; // Adjusted Z scaling
+
+           // Calculate head rotation
+           const headRotation = calculateHeadRotation(landmarks);
+           
+           // Apply smoothing to rotation
+           targetRotation = headRotation;
+           currentRotation = smoothRotation(targetRotation, currentRotation, smoothingFactor);
+
+           // Position and rotate the hat model
+           if (hatModel) {
+              // Position hat at forehead position with offset
+              hatModel.position.set(threeX, threeY + yPositionOffset, threeZ);
+              
+              // Apply smoothed head rotation to hat model
+              hatModel.rotation.x = currentRotation.x;
+              hatModel.rotation.y = currentRotation.y;
+              hatModel.rotation.z = currentRotation.z;
+              
+              // Dynamically adjust scale based on head size with better scaling
+              const dynamicScale = headFit.scale * 0.15; // Reduced multiplier for better fit
+              hatModel.scale.set(dynamicScale, dynamicScale, dynamicScale);
+
+             // Update debug info
+             document.getElementById('rot-x').textContent = currentRotation.x.toFixed(2);
+             document.getElementById('rot-y').textContent = currentRotation.y.toFixed(2);
+             document.getElementById('rot-z').textContent = currentRotation.z.toFixed(2);
+             document.getElementById('pos-x').textContent = threeX.toFixed(2);
+             document.getElementById('pos-y').textContent = (threeY + yPositionOffset).toFixed(2);
+             document.getElementById('pos-z').textContent = threeZ.toFixed(2);
+             document.getElementById('head-width').textContent = headFit.width.toFixed(3);
+             document.getElementById('head-height').textContent = headFit.height.toFixed(3);
+             document.getElementById('hat-scale').textContent = dynamicScale.toFixed(3);
+           }
+        }
+      }
+      canvasCtx.restore();
+
+      // Render Three.js scene
+      renderer.render(scene, camera);
+    });
+
+    // Start the camera
+    const cameraFeed = new Camera(videoElement, {
+      onFrame: async () => {
+        await faceMesh.send({ image: videoElement });
+      },
+      width: 1280,
+      height: 720
+    });
+    cameraFeed.start();
+
+    // Control event listeners
+    document.getElementById('smoothing').addEventListener('input', (e) => {
+      smoothingFactor = parseFloat(e.target.value);
+      document.getElementById('smoothing-value').textContent = smoothingFactor.toFixed(2);
+    });
+
+    document.getElementById('x-scale').addEventListener('input', (e) => {
+      rotationScales.x = parseFloat(e.target.value);
+      document.getElementById('x-scale-value').textContent = rotationScales.x.toFixed(1);
+    });
+
+    document.getElementById('y-scale').addEventListener('input', (e) => {
+      rotationScales.y = parseFloat(e.target.value);
+      document.getElementById('y-scale-value').textContent = rotationScales.y.toFixed(1);
+    });
+
+         document.getElementById('z-scale').addEventListener('input', (e) => {
+       rotationScales.z = parseFloat(e.target.value);
+       document.getElementById('z-scale-value').textContent = rotationScales.z.toFixed(1);
+     });
+
+     document.getElementById('scale-mult').addEventListener('input', (e) => {
+       scaleMultiplier = parseFloat(e.target.value);
+       document.getElementById('scale-mult-value').textContent = scaleMultiplier.toFixed(1);
+     });
+
+     document.getElementById('y-offset').addEventListener('input', (e) => {
+       yPositionOffset = parseFloat(e.target.value);
+       document.getElementById('y-offset-value').textContent = yPositionOffset.toFixed(2);
+     });
+
+     document.getElementById('show-debug').addEventListener('change', (e) => {
+       document.getElementById('debug-info').style.display = e.target.checked ? 'block' : 'none';
+     });
+  </script>
+</body>
+</html> 

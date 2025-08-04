@@ -1,0 +1,1460 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MediaPipe FaceMesh with 3D Hat Model</title>
+  <!-- MediaPipe Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <!-- Three.js and GLTFLoader Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.134/examples/js/loaders/GLTFLoader.js"></script>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font-family: Arial, sans-serif;
+    }
+    #output_canvas { position: absolute; top: 0; left: 0; }
+    #three_canvas { position: absolute; top: 0; left: 0; }
+    #settings-toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      z-index: 1000;
+    }
+    #settings-panel {
+      position: absolute;
+      top: 60px;
+      right: 10px;
+      background: rgba(0,0,0,0.9);
+      color:white;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000;
+      display: none;
+      min-width: 200px;
+    }
+    #settings-panel label {
+      display: block;
+      margin: 8px 0;
+    }
+    #settings-panel button {
+      width: 100%;
+      padding: 8px;
+      margin: 5px 0;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .save-btn { background: #4CAF50; color: white; }
+    .reset-btn { background: #f44336; color: white; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <video class="input_video" style="display: none;"></video>
+    <canvas class="output_canvas" width="1280" height="720"
+        style="position: absolute; top: 0; left: 0; z-index: 1;"></canvas>
+
+    <canvas id="three_canvas" width="1280" height="720"
+        style="position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none;"></canvas>
+
+  </div>
+  
+  <button id="settings-toggle">⚙️</button>
+  
+  <div id="settings-panel">
+    <h4>🎩 Điều chỉnh Mũ</h4>
+
+
+
+    <label>
+             Smoothing Factor: <input type="range" id="smoothing" min="0.01" max="0.5" step="0.01" value="0.4">
+       <span id="smoothing-value">0.4</span>
+    </label>
+
+
+    <h4>👓 Điều chỉnh Kính</h4>
+
+    <label>
+      Glasses Y Offset: <input type="range" id="glasses-y-offset" min="-0.2" max="0.2" step="0.01" value="0.05">
+      <span id="glasses-y-offset-value">0.05</span>
+    </label>
+
+                                     <label>
+         <input type="checkbox" id="show-mesh" checked> Hiển thị Face Mesh
+       </label>
+       <label>
+         <input type="checkbox" id="show-mesh-tesselation" checked> Tesselation (Xanh nhạt)
+       </label>
+       <label>
+         <input type="checkbox" id="show-mesh-contours" checked> Contours (Xanh dương)
+       </label>
+       <label>
+         <input type="checkbox" id="show-mesh-irises" checked> Irises (Cyan)
+       </label>
+             <label>
+         <input type="checkbox" id="show-axes" checked> Hiển thị Trục Tọa Độ (Oxyz)
+       </label>
+
+       
+       <div class="setting-group">
+         <label for="edge-tracking">Edge Tracking Sensitivity:</label>
+         <input type="range" id="edge-tracking" min="0.1" max="0.3" step="0.05" value="0.1">
+         <span id="edge-tracking-value">0.1</span>
+       </div>
+                 <div id="debug-info" style="margin-top: 10px; font-size: 12px; color: #ccc;">
+           <div>🎯 Face Mesh Components:</div>
+           <div>• Tesselation: Lưới chính (Xanh nhạt)</div>
+           <div>• Contours: Viền khuôn mặt (Xanh dương)</div>
+           <div>• Irises: Mống mắt (Cyan)</div>
+           <div>🎯 Landmarks được xác định:</div>
+           <div>• Mũi: Điểm 1, 168 (Cyan)</div>
+           <div>• Mắt: Điểm 33, 263 (Tím)</div>
+           <div>• Lông mày: Điểm 70, 300 (Vàng)</div>
+           <div>• Miệng: Điểm 13, 14 (Cam)</div>
+         </div>
+    <hr style="margin: 10px 0; border-color: #555;">
+    <button id="save-settings" class="save-btn">Lưu Settings</button>
+    <button id="reset-settings" class="reset-btn">Reset</button>
+    <button id="reset-scaling" class="reset-btn" style="margin-top: 5px;">Clear Scale Debug</button>
+    
+    <div class="setting-group" style="margin-top: 10px;">
+      <label for="model-scale-boost">Model Scale Boost:</label>
+      <input type="range" id="model-scale-boost" min="0.5" max="10.0" step="0.5" value="1.0">
+      <span id="model-scale-boost-value">1.0</span>
+    </div>
+    
+    <div style="margin-top: 10px; font-size: 12px; color: #ccc;">
+      <div id="scale-debug">Scale Debug Info:</div>
+    </div>
+  </div>
+  <script type="module">
+//#region 
+    // MediaPipe Setup
+    const videoElement = document.getElementsByClassName('input_video')[0];
+    const canvasElement = document.getElementsByClassName('output_canvas')[0];
+    canvasElement.width = 1280;
+    canvasElement.height = 720;
+    const canvasCtx = canvasElement.getContext('2d');
+    
+
+    // Three.js Setup
+    const threeCanvas = document.getElementById('three_canvas');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, 1280 / 720, 0.1, 1000);
+    camera.position.z = 5;
+    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+    renderer.setSize(1280, 720);
+
+    // Add ambient light
+    const light = new THREE.AmbientLight(0xffffff);
+    scene.add(light);
+
+    // Add directional light for better visibility
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 1, 1);
+    scene.add(directionalLight);
+
+    // Create reference line (horizontal line perpendicular to nose bridge)
+    const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-2, 0, 0),
+      new THREE.Vector3(2, 0, 0)
+    ]);
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 2 });
+    const referenceLine = new THREE.Line(lineGeometry, lineMaterial);
+    scene.add(referenceLine);
+
+    // Tạo đường thẳng từ cằm đến giữa lông mày song song với trục Oy
+    const chinToEyebrowGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0.8, 0),  // Điểm trên (lông mày)
+      new THREE.Vector3(0, 0.4, 0),
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, -0.4, 0),
+      new THREE.Vector3(0, -0.8, 0)  // Điểm dưới (cằm)
+    ]);
+    const chinToEyebrowMaterial = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 4 });
+    const chinToEyebrowLine = new THREE.Line(chinToEyebrowGeometry, chinToEyebrowMaterial);
+    scene.add(chinToEyebrowLine);
+
+    // Tạo đường lông mày (eyebrow line) - cải tiến với đường cong
+    const eyebrowGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.2, 0.1, 0),
+      new THREE.Vector3(-0.8, 0.15, 0),
+      new THREE.Vector3(-0.4, 0.2, 0),
+      new THREE.Vector3(0, 0.25, 0),
+      new THREE.Vector3(0.4, 0.2, 0),
+      new THREE.Vector3(0.8, 0.15, 0),
+      new THREE.Vector3(1.2, 0.1, 0)
+    ]);
+    const eyebrowMaterial = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 4 });
+    const eyebrowLine = new THREE.Line(eyebrowGeometry, eyebrowMaterial);
+    scene.add(eyebrowLine);
+
+    // Tạo đường mắt (eye line) - đường cong mắt
+    const eyeGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.5, -0.1, 0),
+      new THREE.Vector3(-1.2, -0.15, 0),
+      new THREE.Vector3(-0.8, -0.2, 0),
+      new THREE.Vector3(-0.4, -0.25, 0),
+      new THREE.Vector3(0, -0.3, 0),
+      new THREE.Vector3(0.4, -0.25, 0),
+      new THREE.Vector3(0.8, -0.2, 0),
+      new THREE.Vector3(1.2, -0.15, 0),
+      new THREE.Vector3(1.5, -0.1, 0)
+    ]);
+    const eyeMaterial = new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 3 });
+    const eyeLine = new THREE.Line(eyeGeometry, eyeMaterial);
+    scene.add(eyeLine);
+
+    // Tạo đường miệng (mouth line) - đường cong miệng
+    const mouthGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-1.0, -0.8, 0),
+      new THREE.Vector3(-0.6, -0.9, 0),
+      new THREE.Vector3(-0.2, -1.0, 0),
+      new THREE.Vector3(0, -1.1, 0),
+      new THREE.Vector3(0.2, -1.0, 0),
+      new THREE.Vector3(0.6, -0.9, 0),
+      new THREE.Vector3(1.0, -0.8, 0)
+    ]);
+    const mouthMaterial = new THREE.LineBasicMaterial({ color: 0xff8800, linewidth: 3 });
+    const mouthLine = new THREE.Line(mouthGeometry, mouthMaterial);
+    scene.add(mouthLine);
+
+    // Tạo các outline mesh cho các vùng khuôn mặt
+    const createOutlineMesh = (color, size = 0.1, shape = 'ring') => {
+      let geometry;
+      
+      if (shape === 'ring') {
+        geometry = new THREE.RingGeometry(size * 0.8, size, 32);
+      } else if (shape === 'ellipse') {
+        geometry = new THREE.RingGeometry(size * 0.6, size, 32);
+        geometry.scale(1.5, 1, 1); // Làm dẹt để tạo hình ellipse
+      } else if (shape === 'oval') {
+        geometry = new THREE.RingGeometry(size * 0.7, size, 32);
+        geometry.scale(2, 1, 1); // Làm dẹt hơn cho lông mày
+      }
+      
+      const material = new THREE.MeshBasicMaterial({ 
+        color: color, 
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.8
+      });
+      return new THREE.Mesh(geometry, material);
+    };
+
+    // Tạo các outline cho các vùng với hình dạng phù hợp
+    const noseOutline = createOutlineMesh(0x00ffff, 0.15, 'ring'); // Hình tròn cho mũi
+    const leftEyeOutline = createOutlineMesh(0xff00ff, 0.12, 'ellipse'); // Hình ellipse cho mắt
+    const rightEyeOutline = createOutlineMesh(0xff00ff, 0.12, 'ellipse');
+    const leftEyebrowOutline = createOutlineMesh(0xffff00, 0.18, 'oval'); // Hình oval cho lông mày
+    const rightEyebrowOutline = createOutlineMesh(0xffff00, 0.18, 'oval');
+    const mouthOutline = createOutlineMesh(0xff8800, 0.25, 'ellipse'); // Hình ellipse cho miệng
+    
+    scene.add(noseOutline);
+    scene.add(leftEyeOutline);
+    scene.add(rightEyeOutline);
+    scene.add(leftEyebrowOutline);
+    scene.add(rightEyebrowOutline);
+    scene.add(mouthOutline);
+
+    // Tạo trục tọa độ riêng cho model
+    const modelAxes = new THREE.Group();
+    
+    // Trục X (đỏ)
+    const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(1.5, 0, 0)
+    ]);
+    const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 3 });
+    const xAxis = new THREE.Line(xAxisGeometry, xAxisMaterial);
+    modelAxes.add(xAxis);
+    
+    // Trục Y (xanh lá)
+    const yAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 1.5, 0)
+    ]);
+    const yAxisMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 3 });
+    const yAxis = new THREE.Line(yAxisGeometry, yAxisMaterial);
+    modelAxes.add(yAxis);
+    
+    // Trục Z (xanh dương)
+    const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(0, 0, 1.5)
+    ]);
+    const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff, linewidth: 3 });
+    const zAxis = new THREE.Line(zAxisGeometry, zAxisMaterial);
+    modelAxes.add(zAxis);
+    
+    // Thêm nhãn cho các trục
+    const createAxisLabel = (text, color, position) => {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = 64;
+      canvas.height = 64;
+      context.fillStyle = color;
+      context.font = '48px Arial';
+      context.textAlign = 'center';
+      context.fillText(text, 32, 40);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      const material = new THREE.SpriteMaterial({ map: texture });
+      const sprite = new THREE.Sprite(material);
+      sprite.position.copy(position);
+      sprite.scale.set(0.3, 0.3, 0.3);
+      return sprite;
+    };
+    
+    modelAxes.add(createAxisLabel('X', '#ff0000', new THREE.Vector3(1.8, 0, 0)));
+    modelAxes.add(createAxisLabel('Y', '#00ff00', new THREE.Vector3(0, 1.8, 0)));
+    modelAxes.add(createAxisLabel('Z', '#0000ff', new THREE.Vector3(0, 0, 1.8)));
+    
+    scene.add(modelAxes);
+
+    // Variables with settings
+    let currentRotation = { x: 0, y: 0, z: 0 };
+    let targetRotation = { x: 0, y: 0, z: 0 };
+    let smoothingFactor = 0.4; // Tăng để tracking mượt mà và tự nhiên hơn
+    
+    // Dynamic scaling settings
+    let modelScaleBoost = 1.0; // Additional scale multiplier for real-time adjustment
+    
+    // Variables for position tracking fallback
+    let lastKnownPosition = { x: 0, y: 0, z: 0 };
+    let trackingLostFrames = 0;
+    const maxTrackingLostFrames = 30; // Giữ vị trí cuối trong 30 frames
+    let edgeTrackingSensitivity = 0.1; // Độ nhạy tracking ở rìa màn hình
+         let showMesh = true;
+     let showMeshTesselation = true;
+     let showMeshContours = true;
+     let showMeshIrises = true;
+     let showAxes = true;
+
+    
+    // Model size configuration - định nghĩa kích thước chuẩn cho từng loại model
+    const modelSizeConfig = {
+      hat: 2,        // Kích thước chuẩn cho hat
+      glasses: 1.5,   // Kích thước chuẩn cho glasses
+      fallbackHat: 0.2,
+      fallbackGlasses: 0.15
+    };
+    
+    // Glasses settings
+    let glassesYOffset = 0.05;
+
+    // Load saved settings from localStorage
+    function loadSettings() {
+      const savedSettings = localStorage.getItem('hatTrackingSettings');
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings);
+        smoothingFactor = settings.smoothingFactor || 0.4;
+                 showMesh = settings.showMesh !== undefined ? settings.showMesh : true;
+         showMeshTesselation = settings.showMeshTesselation !== undefined ? settings.showMeshTesselation : true;
+         showMeshContours = settings.showMeshContours !== undefined ? settings.showMeshContours : true;
+         showMeshIrises = settings.showMeshIrises !== undefined ? settings.showMeshIrises : true;
+         showAxes = settings.showAxes !== undefined ? settings.showAxes : true;
+
+         edgeTrackingSensitivity = settings.edgeTrackingSensitivity || 0.1;
+         
+                 // Load glasses settings
+        glassesYOffset = settings.glassesYOffset || 0.05;
+        
+        // Load model scale boost
+        modelScaleBoost = settings.modelScaleBoost || 1.0;
+      }
+    }
+
+    // Save settings to localStorage
+    function saveSettings() {
+      const settings = {
+        smoothingFactor: smoothingFactor,
+        showMesh: showMesh,
+        showMeshTesselation: showMeshTesselation,
+        showMeshContours: showMeshContours,
+        showMeshIrises: showMeshIrises,
+        showAxes: showAxes,
+        edgeTrackingSensitivity: edgeTrackingSensitivity,
+        glassesYOffset: glassesYOffset,
+        modelScaleBoost: modelScaleBoost
+      };
+      localStorage.setItem('hatTrackingSettings', JSON.stringify(settings));
+      console.log('Settings saved:', settings);
+    }
+
+    // Reset settings to default
+    function resetSettings() {
+      smoothingFactor = 0.4;
+      showMesh = true;
+      showMeshTesselation = true;
+      showMeshContours = true;
+      showMeshIrises = true;
+      showAxes = true;
+      edgeTrackingSensitivity = 0.1;
+      
+      // Reset glasses settings
+      glassesYOffset = 0.05;
+      
+      // Reset model scale boost
+      modelScaleBoost = 1.0;
+      
+      // Reset head detection for re-scaling
+      resetHeadDetection();
+      
+      // Remove saved settings
+      localStorage.removeItem('hatTrackingSettings');
+      
+      console.log('Settings reset to default');
+    }
+    function logModelSize(model, label = 'Model') {
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  console.log(`📦 Kích thước ${label} sau khi scale:`);
+  console.log(`  x: ${size.x.toFixed(3)}`);
+  console.log(`  y: ${size.y.toFixed(3)}`);
+  console.log(`  z: ${size.z.toFixed(3)}`);
+}
+//#endregion 
+
+    // Enhanced function to normalize model scale and store fixed size
+    function smartNormalizeModelScale(model, targetSize = 0.2, tolerance = 0.05) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      // Always normalize to exact targetSize
+      const scale = targetSize / maxDim;
+      model.scale.set(scale, scale, scale);
+      
+      // Store the normalized scale for consistent sizing
+      model.userData.normalizedScale = scale;
+      model.userData.targetSize = targetSize;
+      
+      console.log(`✅ Model chuẩn hóa: scale=${scale.toFixed(4)}, targetSize=${targetSize}`);
+      logModelSize(model);
+    }
+
+
+    // Function to apply dynamic scaling per frame
+    function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
+      if (!model || !headFit) return;
+      
+      // Calculate appropriate scale based on head size
+      const headScale = Math.min(headFit.width, headFit.height);
+      let scaleMultiplier;
+      
+      // Different scale multipliers for different model types
+      switch(modelType) {
+        case 'hat':
+          scaleMultiplier = 3.5;
+          break;
+        case 'glasses':
+          scaleMultiplier = 1.6; // User đã điều chỉnh
+          break;
+        default:
+          scaleMultiplier = 3.5;
+      }
+      
+      const finalScale = headScale * scaleMultiplier * 1.0 * modelScaleBoost;
+      
+      // Apply scale with smoothing for stable animation
+      const targetScale = new THREE.Vector3(finalScale, finalScale, finalScale);
+      model.scale.lerp(targetScale, smoothingFactor * 0.5); // Slower smoothing for scale
+      
+      // Store current scale for debugging
+      model.userData.currentDynamicScale = finalScale;
+      
+      // Update debug info occasionally (not every frame for performance)
+      if (Math.random() < 0.01) { // 1% của frames
+        const debugElement = document.getElementById('scale-debug');
+        if (debugElement) {
+          debugElement.innerHTML = `
+            ${modelType}: headScale=${headScale.toFixed(3)}, multiplier=${scaleMultiplier}, boost=${modelScaleBoost}, final=${finalScale.toFixed(3)}
+          `;
+        }
+      }
+    }
+
+    // Function to reset scaling (mainly for debugging - not needed for dynamic scaling)
+    function resetHeadDetection() {
+      // Clear debug info
+      const debugElement = document.getElementById('scale-debug');
+      if (debugElement) {
+        debugElement.innerHTML = 'Scale Debug Info: Cleared - will update next frame';
+      }
+      
+      console.log('🔄 Scale debug cleared. Dynamic scaling continues per frame.');
+    }
+
+    // Function to apply new scale boost (no action needed - will be applied next frame)
+    function applyScaleBoostToModels() {
+      // Scale boost will be automatically applied in the next frame via applyDynamicScalePerFrame
+      console.log(`🔧 Scale boost updated to: ${modelScaleBoost} (will apply next frame)`);
+      
+      // Update debug info immediately
+      const debugElement = document.getElementById('scale-debug');
+      if (debugElement) {
+        debugElement.innerHTML = `Scale boost updated to: ${modelScaleBoost} - applying next frame...`;
+      }
+    }
+
+    // Helper function to add new model with automatic normalization
+    function addNormalizedModel(model, modelType, scene) {
+      const targetSize = modelSizeConfig[modelType] || 0.2;
+      smartNormalizeModelScale(model, targetSize);
+      scene.add(model);
+      console.log(`✅ ${modelType} model added with normalized size: ${targetSize}`);
+      return model;
+    }
+
+    // Load the low-poly hat model
+    const loader = new THREE.GLTFLoader();
+    let hatModel;
+    
+    // Create a fallback hat model in case GLTF fails to load
+    const createFallbackHat = () => {
+      const geometry = new THREE.ConeGeometry(0.5, 1, 8);
+      const material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
+      const fallbackHat = new THREE.Mesh(geometry, material);
+      fallbackHat.rotation.x = Math.PI / 2;
+      return fallbackHat;
+    };
+    
+    // Tạo model tạm thời ngay lập tức để test
+    hatModel = createFallbackHat();
+    smartNormalizeModelScale(hatModel, modelSizeConfig.fallbackHat); // Normalize fallback model
+    scene.add(hatModel);
+    
+    loader.load(
+      'assets/low_poly_hat/hat.gltf',
+      (gltf) => {
+        // Remove temporary model
+        scene.remove(hatModel);
+        // Add real model
+        hatModel = gltf.scene;
+        
+        // Normalize model scale to ensure consistent size across different models
+        smartNormalizeModelScale(hatModel, modelSizeConfig.hat);
+        
+        hatModel.rotation.set(0, 0, 0);
+        scene.add(hatModel);
+        console.log('✅ Hat model loaded and scale normalized - will use dynamic scaling per frame');
+      },
+      (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
+      (error) => {
+        console.error('Error loading GLTF model:', error);
+      }
+    );
+
+    // Load the glasses model
+    let glassesModel;
+    
+    // Create a fallback glasses model in case GLTF fails to load
+    const createFallbackGlasses = () => {
+      const geometry = new THREE.RingGeometry(0.3, 0.4, 8);
+      const material = new THREE.MeshBasicMaterial({ color: 0x000000 });
+      const fallbackGlasses = new THREE.Mesh(geometry, material);
+      fallbackGlasses.rotation.x = Math.PI / 2;
+      return fallbackGlasses;
+    };
+    
+    // Tạo model tạm thời ngay lập tức để test
+    glassesModel = createFallbackGlasses();
+    smartNormalizeModelScale(glassesModel, modelSizeConfig.fallbackGlasses); // Normalize fallback model
+    scene.add(glassesModel);
+    
+    loader.load(
+      'assets/low_poly_hat/sun_glasses.glb',
+      (gltf) => {
+        // Remove temporary model
+        scene.remove(glassesModel);
+        // Add real model
+        glassesModel = gltf.scene;
+        
+        // Normalize model scale to ensure consistent size across different models
+        smartNormalizeModelScale(glassesModel, modelSizeConfig.glasses);
+        
+        // Apply initial rotation to fix mirror effect - flip the model 180 degrees around Y-axis
+        glassesModel.rotation.set(0, 0, 0);
+        // glassesModel.rotation.y = Math.PI;
+        scene.add(glassesModel);
+        console.log('✅ Glasses model loaded, scale normalized - will use dynamic scaling per frame');
+      },
+      (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
+      (error) => {
+        console.error('Error loading glasses GLTF model:', error);
+      }
+    );
+
+    // Function to calculate head size and position from landmarks - tracking theo forehead
+    function calculateHeadFit(landmarks) {
+      // Get key landmarks for head size calculation with fallbacks
+      const leftEar = landmarks[234] || landmarks[227]; // Left ear with fallback
+      const rightEar = landmarks[454] || landmarks[447]; // Right ear with fallback
+      const leftEye = landmarks[33] || landmarks[7]; // Left eye with fallback
+      const rightEye = landmarks[263] || landmarks[249]; // Right eye with fallback
+      const nose = landmarks[1] || landmarks[4]; // Nose tip with fallback
+      const chin = landmarks[152] || landmarks[175]; // Chin with fallback
+      const forehead = landmarks[10] || landmarks[151]; // Forehead with fallback
+      const leftCheek = landmarks[123] || landmarks[50]; // Left cheek with fallback
+      const rightCheek = landmarks[352] || landmarks[280]; // Right cheek with fallback
+
+      // Validate landmarks exist and are within reasonable bounds
+      const isValidLandmark = (landmark) => {
+        return landmark && 
+               landmark.x >= 0 && landmark.x <= 1 && 
+               landmark.y >= 0 && landmark.y <= 1 && 
+               landmark.z >= -1 && landmark.z <= 1;
+      };
+
+      // Use fallback calculation if ears are not reliable (common at screen edges)
+      let headWidth, headHeight, headDepth;
+      
+      if (isValidLandmark(leftEar) && isValidLandmark(rightEar)) {
+        // Use ear-to-ear width if available
+        headWidth = Math.abs(leftEar.x - rightEar.x);
+        headDepth = Math.abs(leftEar.z - rightEar.z);
+      } else {
+        // Fallback to eye-to-eye width
+        headWidth = Math.abs(leftEye.x - rightEye.x) * 1.5; // Scale up since eyes are closer
+        headDepth = Math.abs(leftEye.z - rightEye.z) * 1.5;
+      }
+      
+      // Calculate head height (forehead to chin)
+      if (isValidLandmark(forehead) && isValidLandmark(chin)) {
+        headHeight = Math.abs(forehead.y - chin.y);
+      } else {
+        // Fallback to nose-based height
+        const noseTop = landmarks[168] || landmarks[6]; // Top of nose
+        const noseBottom = landmarks[2] || landmarks[1]; // Bottom of nose
+        headHeight = Math.abs(noseTop.y - noseBottom.y) * 3; // Scale up
+      }
+      
+      // Use forehead position with fallback to nose
+      let centerX, centerY, centerZ;
+      if (isValidLandmark(forehead)) {
+        centerX = forehead.x;
+        centerY = forehead.y;
+        centerZ = forehead.z;
+      } else if (isValidLandmark(nose)) {
+        // Use nose position and adjust Y upward to approximate forehead
+        centerX = nose.x;
+        centerY = nose.y - 0.1; // Move up to approximate forehead
+        centerZ = nose.z;
+      } else {
+        // Last resort: use center of available landmarks
+        const validLandmarks = [leftEye, rightEye, leftCheek, rightCheek].filter(isValidLandmark);
+        if (validLandmarks.length > 0) {
+          centerX = validLandmarks.reduce((sum, lm) => sum + lm.x, 0) / validLandmarks.length;
+          centerY = validLandmarks.reduce((sum, lm) => sum + lm.y, 0) / validLandmarks.length;
+          centerZ = validLandmarks.reduce((sum, lm) => sum + lm.z, 0) / validLandmarks.length;
+        } else {
+          // Default to center of screen
+          centerX = 0.5;
+          centerY = 0.5;
+          centerZ = 0;
+        }
+      }
+
+      return {
+        width: headWidth || 0.3, // Default width if calculation fails
+        height: headHeight || 0.4, // Default height if calculation fails
+        depth: headDepth || 0.1, // Default depth if calculation fails
+        center: { x: centerX, y: centerY, z: centerZ }
+      };
+    }
+
+    // Function to calculate head rotation matrix using the new method
+    function calculateHeadRotationMatrix(landmarks) {
+      // Các điểm landmark chính
+      const leftEar = landmarks[234];
+      const rightEar = landmarks[454];
+      const forehead = landmarks[10];
+      const chin = landmarks[152];
+
+      // 1. Tính trục X: từ tai phải sang tai trái (right → left) - đảo ngược để sửa hướng
+      const xDir = new THREE.Vector3(
+        leftEar.x - rightEar.x,
+        leftEar.y - rightEar.y,
+        leftEar.z - rightEar.z
+      ).normalize();
+
+      // 2. Tính trục Y: từ trán đến cằm (forehead → chin)
+      const yDir = new THREE.Vector3(
+        forehead.x - chin.x,
+        forehead.y - chin.y,
+        forehead.z - chin.z
+      ).normalize();
+
+      // 3. Tính trục Z: vuông góc mặt hướng ra ngoài (Z = -(X × Y))
+      const zDir = new THREE.Vector3().crossVectors(xDir, yDir).normalize().multiplyScalar(-1);
+
+      // Re-orthogonalize Y để đảm bảo trực giao (Y = Z × X)
+      yDir.crossVectors(zDir, xDir).normalize();
+
+      // Tạo ma trận quay 3D
+      const rotationMatrix = new THREE.Matrix4();
+      rotationMatrix.makeBasis(xDir, yDir, zDir); // X: ngang, Y: dọc mặt, Z: hướng ra
+
+      return rotationMatrix;
+    }
+
+    // Function to calculate head rotation from landmarks using new matrix-based method
+    function calculateHeadRotation(landmarks) {
+      try {
+        // Validate landmarks
+        if (!landmarks || landmarks.length < 468) {
+          console.warn('Invalid landmarks for head rotation calculation');
+          return { x: 0, y: 0, z: 0 };
+        }
+
+        // Use new matrix-based calculation
+        const rotationMatrix = calculateHeadRotationMatrix(landmarks);
+        
+        // Extract Euler angles from rotation matrix
+        const euler = new THREE.Euler();
+        euler.setFromRotationMatrix(rotationMatrix);
+        
+        // Validate Euler angles
+        if (isNaN(euler.x) || isNaN(euler.y) || isNaN(euler.z)) {
+          console.warn('Invalid Euler angles from matrix, using fallback');
+          throw new Error('Invalid Euler angles');
+        }
+
+                        // Apply smoothing
+                const smoothingFactor = 0.3;
+                currentRotation.x += (euler.x - currentRotation.x) * smoothingFactor;
+                currentRotation.y += (euler.y - currentRotation.y) * smoothingFactor;
+                currentRotation.z += (euler.z - currentRotation.z) * smoothingFactor;
+
+        return currentRotation;
+      } catch (error) {
+        console.warn('Matrix calculation failed, using fallback method:', error);
+        
+        // Fallback to old method
+        try {
+          const nose = landmarks[1]; // Nose tip
+          const leftEye = landmarks[33]; // Left eye
+          const rightEye = landmarks[263]; // Right eye
+          const leftEar = landmarks[234]; // Left ear
+          const rightEar = landmarks[454]; // Right ear
+          const forehead = landmarks[10]; // Forehead
+          const chin = landmarks[152]; // Chin
+
+          // Kiểm tra landmarks có hợp lệ không
+          if (!nose || !leftEye || !rightEye || !leftEar || !rightEar || !forehead || !chin) {
+            console.warn('Missing landmarks for fallback method');
+            return { x: 0, y: 0, z: 0 };
+          }
+
+          // Calculate head rotation around Y-axis (left-right) - đảo ngược cho camera mirror
+          const eyeCenterX = (leftEye.x + rightEye.x) / 2;
+          const earCenterX = (leftEar.x + rightEar.x) / 2;
+          const headWidth = Math.abs(leftEar.x - rightEar.x);
+          const yRotation = -Math.atan2(eyeCenterX - earCenterX, headWidth * 0.25);
+
+          // Calculate head rotation around X-axis (up-down) - tracking tự nhiên hơn
+          const eyeCenterY = (leftEye.y + rightEye.y) / 2;
+          const noseY = nose.y;
+          const headHeight = Math.abs(forehead.y - chin.y);
+          const xRotation = Math.atan2(noseY - eyeCenterY, headHeight * 0.4);
+
+                            // Apply smoothing
+                  const smoothingFactor = 0.3;
+                  currentRotation.x += (xRotation - currentRotation.x) * smoothingFactor;
+                  currentRotation.y += (yRotation - currentRotation.y) * smoothingFactor;
+                  currentRotation.z += (0 - currentRotation.z) * smoothingFactor;
+
+          return currentRotation;
+        } catch (fallbackError) {
+          console.error('Both matrix and fallback methods failed:', fallbackError);
+          return { x: 0, y: 0, z: 0 };
+        }
+      }
+    }
+
+    // Function to calculate nose bridge direction from mesh data
+    function calculateNoseBridgeFromMesh(landmarks) {
+      // Define nose bridge landmark indices based on MediaPipe FaceMesh
+      // These are the key points that form the nose bridge from forehead to nose tip
+      const noseBridgePoints = [
+        10,   // Forehead center
+        151,  // Upper nose bridge
+        9,    // Upper nose bridge
+        8,    // Upper nose bridge
+        168,  // Upper nose bridge
+        6,    // Middle nose bridge
+        197,  // Middle nose bridge
+        196,  // Middle nose bridge
+        3,    // Lower nose bridge
+        51,   // Lower nose bridge
+        1     // Nose tip
+      ];
+      
+      // Filter valid points and calculate center line
+      const validPoints = [];
+      for (const pointIndex of noseBridgePoints) {
+        if (landmarks[pointIndex]) {
+          validPoints.push(landmarks[pointIndex]);
+        }
+      }
+      
+      if (validPoints.length < 3) {
+        console.warn('Not enough valid nose bridge points');
+        return { x: 0, y: 1 }; // Default vertical direction
+      }
+      
+      // Calculate the main direction vector from forehead to nose tip
+      const startPoint = validPoints[0]; // Forehead
+      const endPoint = validPoints[validPoints.length - 1]; // Nose tip
+      
+      const bridgeVectorX = endPoint.x - startPoint.x;
+      const bridgeVectorY = endPoint.y - startPoint.y;
+      
+      // Calculate perpendicular vector (90 degrees rotation)
+      const perpVectorX = -bridgeVectorY;
+      const perpVectorY = bridgeVectorX;
+      
+      // Normalize the perpendicular vector
+      const length = Math.sqrt(perpVectorX * perpVectorX + perpVectorY * perpVectorY);
+      if (length === 0) {
+        return { x: 0, y: 1 }; // Default vertical direction
+      }
+      
+      const normalizedPerpX = perpVectorX / length;
+      const normalizedPerpY = perpVectorY / length;
+      
+      return { x: normalizedPerpX, y: normalizedPerpY };
+    }
+
+    // Advanced function to extract nose bridge from FACEMESH_TESSELATION connections
+    function extractNoseBridgeFromTesselation(landmarks) {
+      // Define the key nose bridge points using the specific indices provided by user
+      const noseBridgeSequence = [
+        168,  // Upper nose bridge
+        6,    // Middle nose bridge
+        197,  // Middle nose bridge
+        195,  // Lower nose bridge
+        1     // Nose tip
+      ];
+      
+      // Find valid points in sequence
+      const validSequence = [];
+      for (const pointIndex of noseBridgeSequence) {
+        if (landmarks[pointIndex]) {
+          validSequence.push({
+            index: pointIndex,
+            point: landmarks[pointIndex]
+          });
+        }
+      }
+      
+      if (validSequence.length < 3) {
+        console.warn('Not enough valid nose bridge sequence points');
+        return null;
+      }
+      
+      // Calculate the center line of the nose bridge
+      const centerPoints = [];
+      for (let i = 0; i < validSequence.length; i++) {
+        const current = validSequence[i];
+        
+        // For each point, calculate its position along the nose bridge
+        const progress = i / (validSequence.length - 1); // 0 to 1
+        
+        // Add some smoothing by averaging with neighboring points
+        let avgX = current.point.x;
+        let avgY = current.point.y;
+        let avgZ = current.point.z;
+        let count = 1;
+        
+        // Average with previous point if available
+        if (i > 0) {
+          const prev = validSequence[i - 1];
+          avgX += prev.point.x;
+          avgY += prev.point.y;
+          avgZ += prev.point.z;
+          count++;
+        }
+        
+        // Average with next point if available
+        if (i < validSequence.length - 1) {
+          const next = validSequence[i + 1];
+          avgX += next.point.x;
+          avgY += next.point.y;
+          avgZ += next.point.z;
+          count++;
+        }
+        
+        centerPoints.push({
+          x: avgX / count,
+          y: avgY / count,
+          z: avgZ / count,
+          progress: progress
+        });
+      }
+      
+      return centerPoints;
+    }
+
+    // Function to calculate nose bridge direction for reference line
+    function calculateNoseBridgeDirection(landmarks) {
+      // Try the advanced mesh-based extraction first
+      const noseBridgeLine = extractNoseBridgeFromTesselation(landmarks);
+      
+      if (noseBridgeLine && noseBridgeLine.length >= 2) {
+        // Use the extracted nose bridge line to calculate direction
+        const startPoint = noseBridgeLine[0];
+        const endPoint = noseBridgeLine[noseBridgeLine.length - 1];
+        
+        const bridgeVectorX = endPoint.x - startPoint.x;
+        const bridgeVectorY = endPoint.y - startPoint.y;
+        
+        // Calculate perpendicular vector (90 degrees rotation)
+        const perpVectorX = -bridgeVectorY;
+        const perpVectorY = bridgeVectorX;
+        
+        // Normalize the perpendicular vector
+        const length = Math.sqrt(perpVectorX * perpVectorX + perpVectorY * perpVectorY);
+        if (length > 0) {
+          const normalizedPerpX = perpVectorX / length;
+          const normalizedPerpY = perpVectorY / length;
+          return { x: normalizedPerpX, y: normalizedPerpY };
+        }
+      }
+      
+      // Fallback to the simpler mesh-based calculation
+      return calculateNoseBridgeFromMesh(landmarks);
+    }
+
+    // Function to calculate facial landmarks positions
+    function calculateFacialLandmarks(landmarks) {
+      // Check if landmarks exist
+      if (!landmarks || landmarks.length < 468) {
+        console.warn('Invalid landmarks data');
+        return null;
+      }
+
+      try {
+        // Nose landmarks
+        const noseTip = landmarks[1];
+        const noseBridge = landmarks[168];
+        const noseCenter = {
+          x: (noseTip.x + noseBridge.x) / 2,
+          y: (noseTip.y + noseBridge.y) / 2,
+          z: (noseTip.z + noseBridge.z) / 2
+        };
+
+        // Eye landmarks
+        const leftEye = landmarks[33];
+        const rightEye = landmarks[263];
+        const eyeCenter = {
+          x: (leftEye.x + rightEye.x) / 2,
+          y: (leftEye.y + rightEye.y) / 2,
+          z: (leftEye.z + rightEye.z) / 2
+        };
+
+        // Eyebrow landmarks
+        const leftEyebrow = landmarks[70];
+        const rightEyebrow = landmarks[300];
+        const eyebrowCenter = {
+          x: (leftEyebrow.x + rightEyebrow.x) / 2,
+          y: (leftEyebrow.y + rightEyebrow.y) / 2,
+          z: (leftEyebrow.z + rightEyebrow.z) / 2
+        };
+
+        // Chin landmark
+        const chin = landmarks[152];
+
+        // Mouth landmarks
+        const upperLip = landmarks[13];
+        const lowerLip = landmarks[14];
+        const mouthCenter = {
+          x: (upperLip.x + lowerLip.x) / 2,
+          y: (upperLip.y + lowerLip.y) / 2,
+          z: (upperLip.z + lowerLip.z) / 2
+        };
+
+        return {
+          nose: noseCenter,
+          eye: eyeCenter,
+          eyebrow: eyebrowCenter,
+          chin: chin,
+          mouth: mouthCenter,
+          leftEye: leftEye,
+          rightEye: rightEye,
+          leftEyebrow: leftEyebrow,
+          rightEyebrow: rightEyebrow
+        };
+      } catch (error) {
+        console.error('Error calculating facial landmarks:', error);
+        return null;
+      }
+    }
+
+    // Function to map normalized screen coordinates to Three.js world coordinates using camera unprojection
+    function mapToThreeJSWorld(xNorm, yNorm, camera, depth = -2.5) {
+      // xNorm, yNorm: [0..1] → screen space (MediaPipe)
+      // Convert từ [0..1] về [-1..1] để dùng ray
+      const x = (xNorm - 0.5) * 2;
+      const y = -(yNorm - 0.5) * 2;
+
+      // Tạo ray từ camera qua màn hình
+      const vector = new THREE.Vector3(x, y, 0.5);
+      vector.unproject(camera);
+
+     // Ray đi từ camera đến vector
+      const dir = vector.sub(camera.position).normalize();
+
+      // Tính điểm trên ray tại z = depth
+      const distance = (depth - camera.position.z) / dir.z;
+      const pos = camera.position.clone().add(dir.multiplyScalar(distance));
+
+      return pos;
+  }
+
+  // bởi vị dùng clamped Math nên nó bị giới hạn vị trí từ 0 đến 1, ở rìa thì nó lớn hơn 1 nên phải chỉnh lại
+  function oldMapToThreeJS(x, y, z) {
+      // Clamp coordinates to prevent extreme values at screen edges
+      const clampedX = Math.max(0, Math.min(1, x));
+      const clampedY = Math.max(0, Math.min(1, y));
+      const clampedZ = Math.max(-1, Math.min(1, z));
+      
+      // Map to Three.js coordinate system
+      const threeX = -(clampedX * 1280 - 640) / 1280 * 3;
+      const threeY = -(clampedY * 720 - 360) / 720 * 3;
+      const threeZ = -clampedZ * 1000 / 200;
+      
+      // Add small smoothing for edge positions to prevent jitter
+      const edgeThreshold = 0.1; // 10% from edge
+      let smoothedX = threeX;
+      let smoothedY = threeY;
+      
+      if (clampedX < edgeThreshold || clampedX > (1 - edgeThreshold)) {
+        // Apply slight smoothing at edges
+        smoothedX = threeX * 0.95;
+      }
+      if (clampedY < edgeThreshold || clampedY > (1 - edgeThreshold)) {
+        // Apply slight smoothing at edges
+        smoothedY = threeY * 0.95;
+      }
+      
+      return {
+        x: smoothedX,
+        y: smoothedY,
+        z: threeZ
+      };
+    }
+
+    // Function to map 2D coordinates to Three.js coordinates with edge handling
+    function mapToThreeJS(x, y, z, mirror = true) {
+  const aspect = 1280 / 720;
+  const fov = 45;
+  const depth = 5;
+
+  const vFovInRad = (fov * Math.PI) / 180;
+  const heightAtZ = 2 * Math.tan(vFovInRad / 2) * depth;
+  const widthAtZ = heightAtZ * aspect;
+
+  const ndcX = (x - 0.5) * 2;
+  const ndcY = (y - 0.5) * 2;
+
+  let threeX = ndcX * (widthAtZ / 2);
+  let threeY = -ndcY * (heightAtZ / 2);
+  let threeZ = -z * 5;
+
+  // 👉 Mirror nếu cần (vì bạn đã lật canvas bằng scale(-1, 1))
+  if (mirror) {
+    threeX *= -1;
+  }
+
+  return { x: threeX, y: threeY, z: threeZ };
+}
+    // Function to apply smoothing to rotation
+    function smoothRotation(target, current, factor) {
+      return {
+        x: current.x + (target.x - current.x) * factor,
+        y: current.y + (target.y - current.y) * factor,
+        z: current.z + (target.z - current.z) * factor
+      };
+    }
+
+    // MediaPipe FaceMesh Configuration
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+      }
+    });
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.3, // Giảm để tracking tốt hơn ở rìa màn hình
+      minTrackingConfidence: 0.3   // Giảm để tracking tốt hơn ở rìa màn hình
+    });
+
+
+
+    
+    // Hàm Main của code
+    // Process FaceMesh results
+    faceMesh.onResults((results) => {
+      // Save canvas context BEFORE try block to ensure it's always saved
+      canvasCtx.save();
+      
+      try {
+        // Clear the 2D canvas
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        // Lật ngang canvas để sửa camera mirror
+        canvasCtx.translate(canvasElement.width, 0);
+        canvasCtx.scale(-1, 1);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+          trackingLostFrames = 0; // Reset tracking lost counter
+          
+        for (const landmarks of results.multiFaceLandmarks) {
+          console.log('🎯 DEBUG: showMesh =', showMesh, 'landmarks found'); // DEBUG
+          
+                     // Draw face mesh components if enabled
+           if (showMesh) {
+             console.log('🖼️ Drawing face mesh'); // DEBUG
+             // Draw FACEMESH_TESSELATION (main mesh)
+             if (showMeshTesselation) {
+               drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, 
+                 { color: '#50DCF0', lineWidth: 1, circleRadius: 1 });
+             }
+             
+             // Draw FACEMESH_CONTOURS (face contours)
+             if (showMeshContours) {
+               drawConnectors(canvasCtx, landmarks, FACEMESH_CONTOURS, 
+                 { color: '#0000FF', lineWidth: 2, circleRadius: 2 });
+             }
+             
+             // Draw FACEMESH_IRISES (eye irises)
+             if (showMeshIrises) {
+               drawConnectors(canvasCtx, landmarks, FACEMESH_IRISES, 
+                 { color: '#00FFFF', lineWidth: 2, circleRadius: 2 });
+             }
+           }
+
+          console.log('🎯 TRACKING: Starting head fit calculation'); // DEBUG
+          
+          // Calculate head fit and position - tracking theo forehead
+          const headFit = calculateHeadFit(landmarks);
+          
+          // No need for initial head detection anymore - using dynamic scaling per frame
+          
+          // Map forehead position to Three.js coordinate system - model sẽ đặt chính xác theo vị trí trán
+          const threeX = -(headFit.center.x * 1280 - 640) / 1280 * 3;
+          const threeY = -(headFit.center.y * 720 - 360) / 720 * 3;
+          const threeZ = -headFit.center.z * 1000 / 200;
+
+          // Calculate head rotation
+          const headRotation = calculateHeadRotation(landmarks);
+          
+          console.log('🎯 TRACKING: Head rotation calculated', headRotation); // DEBUG
+
+          // Apply smoothing to rotation
+          targetRotation = headRotation;
+          currentRotation = smoothRotation(targetRotation, currentRotation, smoothingFactor);
+
+          // Calculate facial landmarks
+          const facialLandmarks = calculateFacialLandmarks(landmarks);
+
+          // Position and rotate the hat model - đặt chính xác tại forehead
+          if (hatModel && facialLandmarks) {
+            // Calculate nose bridge direction for reference line
+            const noseDirection = calculateNoseBridgeDirection(landmarks);
+            
+            // Update reference line position and rotation
+            referenceLine.position.set(threeX, threeY, threeZ);
+            referenceLine.rotation.z = Math.atan2(noseDirection.y, noseDirection.x);
+            referenceLine.visible = false; // Ẩn đường đỏ
+            
+            // Cập nhật đường thẳng từ cằm đến giữa lông mày song song với trục Oy
+            const chinPos = mapToThreeJS(facialLandmarks.chin.x, facialLandmarks.chin.y, facialLandmarks.chin.z);
+            const eyebrowCenterPos = mapToThreeJS(facialLandmarks.eyebrow.x, facialLandmarks.eyebrow.y, facialLandmarks.eyebrow.z);
+            
+            // Đặt vị trí của đường thẳng tại điểm giữa của cằm và lông mày
+            const middleX = (chinPos.x + eyebrowCenterPos.x) / 2;
+            const middleY = (chinPos.y + eyebrowCenterPos.y) / 2;
+            const middleZ = (chinPos.z + eyebrowCenterPos.z) / 2;
+            
+            chinToEyebrowLine.position.set(middleX, middleY, middleZ);
+            
+            // Áp dụng rotation của đầu để đường thẳng tracking theo mặt khi nghiêng đầu
+            chinToEyebrowLine.rotation.x = currentRotation.x;
+            chinToEyebrowLine.rotation.y = currentRotation.y;
+            chinToEyebrowLine.rotation.z = currentRotation.z;
+            
+            chinToEyebrowLine.visible = false;
+            
+            // Cập nhật đường lông mày
+            const eyebrowPos = mapToThreeJS(facialLandmarks.eyebrow.x, facialLandmarks.eyebrow.y, facialLandmarks.eyebrow.z);
+            eyebrowLine.position.set(eyebrowPos.x, eyebrowPos.y, eyebrowPos.z);
+            eyebrowLine.rotation.z = Math.atan2(noseDirection.y, noseDirection.x);
+            eyebrowLine.visible = false;
+            
+            // Cập nhật đường mắt
+            const eyePos = mapToThreeJS(facialLandmarks.eye.x, facialLandmarks.eye.y, facialLandmarks.eye.z);
+            eyeLine.position.set(eyePos.x, eyePos.y, eyePos.z);
+            eyeLine.rotation.z = Math.atan2(noseDirection.y, noseDirection.x);
+            eyeLine.visible = false;
+            
+            // Cập nhật đường miệng
+            const mouthPos = mapToThreeJS(facialLandmarks.mouth.x, facialLandmarks.mouth.y, facialLandmarks.mouth.z);
+            mouthLine.position.set(mouthPos.x, mouthPos.y, mouthPos.z);
+            mouthLine.rotation.z = Math.atan2(noseDirection.y, noseDirection.x);
+            mouthLine.visible = false;
+            
+            // Hide all outline meshes (tắt hoàn toàn)
+            noseOutline.visible = false;
+            leftEyeOutline.visible = false;
+            rightEyeOutline.visible = false;
+            leftEyebrowOutline.visible = false;
+            rightEyebrowOutline.visible = false;
+            mouthOutline.visible = false;
+             
+                         // Check if hat model exists
+            if (hatModel && headFit) {
+              console.log('🎩 MODEL: Updating hat position and rotation'); // DEBUG
+              const hatPos = mapToThreeJS(headFit.center.x, headFit.center.y, headFit.center.z, true);
+              hatPos.y -= 0.15; // nâng lên trên trán
+
+              // Debug: Check if position is at screen edges
+              const isAtEdge = headFit.center.x < edgeTrackingSensitivity || headFit.center.x > (1 - edgeTrackingSensitivity) || 
+                              headFit.center.y < edgeTrackingSensitivity || headFit.center.y > (1 - edgeTrackingSensitivity);
+              
+              if (isAtEdge) {
+                console.log('⚠️ Tracking ở rìa màn hình:', {
+                  x: headFit.center.x.toFixed(3),
+                  y: headFit.center.y.toFixed(3),
+                  z: headFit.center.z.toFixed(3)
+                });
+                
+                // Thay đổi màu model khi ở rìa để debug
+                if (hatModel.children.length > 0) {
+                  hatModel.children.forEach(child => {
+                    if (child.material) {
+                      child.material.color.setHex(0xff0000); // Đỏ khi ở rìa
+                    }
+                  });
+                }
+              } else {
+                // Khôi phục màu bình thường
+                if (hatModel.children.length > 0) {
+                  hatModel.children.forEach(child => {
+                    if (child.material) {
+                      child.material.color.setHex(0xffffff); // Trắng khi ở giữa
+                    }
+                  });
+                }
+              }
+
+              // Lưu vị trí hiện tại làm last known position
+              lastKnownPosition = { x: hatPos.x, y: hatPos.y, z: hatPos.z };
+              
+              // Làm mượt vị trí với smoothing khác nhau cho edge và center
+              const edgeSmoothingFactor = isAtEdge ? smoothingFactor * 0.7 : smoothingFactor; // Giảm smoothing ở edge
+              hatModel.position.lerp(hatPos, edgeSmoothingFactor);
+
+              // Apply dynamic scaling per frame
+              applyDynamicScalePerFrame(hatModel, headFit, 'hat');
+
+  // Gán xoay bằng quaternion
+  const rotMatrix = calculateHeadRotationMatrix(landmarks);
+  const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+  hatModel.quaternion.slerp(targetQuat, smoothingFactor);
+
+
+  // Cập nhật modelAxes
+  modelAxes.position.copy(hatModel.position);
+  modelAxes.quaternion.copy(hatModel.quaternion);
+  modelAxes.scale.copy(hatModel.scale);
+  modelAxes.visible = showAxes;
+
+  // Glasses tracking - track with eyes
+  if (glassesModel && facialLandmarks && facialLandmarks.eye) {
+    const glassesPos = mapToThreeJS(facialLandmarks.eye.x, facialLandmarks.eye.y, facialLandmarks.eye.z);
+    glassesPos.y += glassesYOffset; // Use configurable Y offset
+    
+    // Apply smoothing to glasses position
+    glassesModel.position.lerp(glassesPos, smoothingFactor);
+
+    // Apply dynamic scaling per frame for glasses
+    applyDynamicScalePerFrame(glassesModel, headFit, 'glasses');
+
+    // Apply head rotation to glasses
+    glassesModel.quaternion.slerp(targetQuat, smoothingFactor);
+  }
+}
+          }
+        }
+      }
+      } catch (error) {
+        console.error('Error in faceMesh processing:', error);
+      } finally {
+        // ALWAYS restore canvas context in finally block to prevent mirror effect accumulation
+        canvasCtx.restore();
+        // Render Three.js scene
+        renderer.render(scene, camera);
+      }
+    });
+
+    // Load settings on startup
+    loadSettings();
+    
+    // Initialize UI values
+    document.getElementById('smoothing').value = smoothingFactor;
+    document.getElementById('smoothing-value').textContent = smoothingFactor.toFixed(2);
+    document.getElementById('edge-tracking').value = edgeTrackingSensitivity;
+    document.getElementById('edge-tracking-value').textContent = edgeTrackingSensitivity.toFixed(2);
+    
+    // Initialize glasses UI values
+    document.getElementById('glasses-y-offset').value = glassesYOffset;
+    document.getElementById('glasses-y-offset-value').textContent = glassesYOffset.toFixed(2);
+    
+    // Initialize model scale boost UI
+    document.getElementById('model-scale-boost').value = modelScaleBoost;
+    document.getElementById('model-scale-boost-value').textContent = modelScaleBoost.toFixed(1);
+
+    // Start the camera
+    const cameraFeed = new Camera(videoElement, {
+      onFrame: async () => {
+        try {
+          await faceMesh.send({ image: videoElement });
+        } catch (error) {
+          console.error('Error sending frame to faceMesh:', error);
+        }
+      },
+      width: 1280,
+      height: 720
+    });
+    
+    // Start camera with error handling
+    cameraFeed.start().catch(error => {
+      console.error('Error starting camera:', error);
+      alert('Không thể khởi động camera. Vui lòng kiểm tra quyền truy cập camera.');
+    });
+
+    // Settings panel toggle
+    document.getElementById('settings-toggle').addEventListener('click', () => {
+      const panel = document.getElementById('settings-panel');
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+
+    // Settings management buttons
+    document.getElementById('save-settings').addEventListener('click', () => {
+      saveSettings();
+      alert('✅ Settings đã được lưu!');
+    });
+
+    document.getElementById('reset-settings').addEventListener('click', () => {
+      if (confirm('⚠️ Bạn có chắc muốn reset về settings mặc định?')) {
+        resetSettings();
+        alert('🔄 Settings đã được reset!');
+      }
+    });
+
+    document.getElementById('reset-scaling').addEventListener('click', () => {
+      resetHeadDetection();
+      alert('🔄 Scale debug info đã được clear! Dynamic scaling vẫn tiếp tục.');
+    });
+
+    // Auto-save settings when values change (with debounce)
+    let saveTimeout;
+    function autoSaveSettings() {
+      clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => {
+        saveSettings();
+      }, 1000); // Save after 1 second of no changes
+    }
+
+
+
+
+
+
+    document.getElementById('smoothing').addEventListener('input', (e) => {
+      smoothingFactor = parseFloat(e.target.value);
+      document.getElementById('smoothing-value').textContent = smoothingFactor.toFixed(2);
+      autoSaveSettings();
+    });
+
+
+
+
+
+                   document.getElementById('show-mesh').addEventListener('change', (e) => {
+        showMesh = e.target.checked;
+        autoSaveSettings();
+      });
+
+      document.getElementById('show-mesh-tesselation').addEventListener('change', (e) => {
+        showMeshTesselation = e.target.checked;
+        autoSaveSettings();
+      });
+
+      document.getElementById('show-mesh-contours').addEventListener('change', (e) => {
+        showMeshContours = e.target.checked;
+        autoSaveSettings();
+      });
+
+      document.getElementById('show-mesh-irises').addEventListener('change', (e) => {
+        showMeshIrises = e.target.checked;
+        autoSaveSettings();
+      });
+
+           document.getElementById('show-axes').addEventListener('change', (e) => {
+        showAxes = e.target.checked;
+        autoSaveSettings();
+      });
+
+
+
+
+       
+       document.getElementById('edge-tracking').addEventListener('input', (e) => {
+         edgeTrackingSensitivity = parseFloat(e.target.value);
+         document.getElementById('edge-tracking-value').textContent = edgeTrackingSensitivity.toFixed(2);
+         autoSaveSettings();
+       });
+
+       // Glasses controls
+
+       document.getElementById('glasses-y-offset').addEventListener('input', (e) => {
+         glassesYOffset = parseFloat(e.target.value);
+         document.getElementById('glasses-y-offset-value').textContent = glassesYOffset.toFixed(2);
+         autoSaveSettings();
+       });
+
+       // Model scale boost control
+       document.getElementById('model-scale-boost').addEventListener('input', (e) => {
+         modelScaleBoost = parseFloat(e.target.value);
+         document.getElementById('model-scale-boost-value').textContent = modelScaleBoost.toFixed(1);
+         
+         // Apply new scale immediately if models are already scaled
+         applyScaleBoostToModels();
+         
+         autoSaveSettings();
+       });
+  </script>
+</body>
+</html>
