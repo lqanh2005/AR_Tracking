@@ -128,8 +128,6 @@
          </div>
     <hr style="margin: 10px 0; border-color: #555;">
     <button id="save-settings" class="save-btn">Lưu Settings</button>
-    <button id="reset-settings" class="reset-btn">Reset</button>
-    <button id="reset-scaling" class="reset-btn" style="margin-top: 5px;">Clear Scale Debug</button>
     
     <div class="setting-group" style="margin-top: 10px;">
       <label for="model-scale-boost">Model Scale Boost:</label>
@@ -490,38 +488,6 @@
           `;
         }
       }
-    }
-
-    // Function to reset scaling (mainly for debugging - not needed for dynamic scaling)
-    function resetHeadDetection() {
-      // Clear debug info
-      const debugElement = document.getElementById('scale-debug');
-      if (debugElement) {
-        debugElement.innerHTML = 'Scale Debug Info: Cleared - will update next frame';
-      }
-      
-      console.log('🔄 Scale debug cleared. Dynamic scaling continues per frame.');
-    }
-
-    // Function to apply new scale boost (no action needed - will be applied next frame)
-    function applyScaleBoostToModels() {
-      // Scale boost will be automatically applied in the next frame via applyDynamicScalePerFrame
-      console.log(`🔧 Scale boost updated to: ${modelScaleBoost} (will apply next frame)`);
-      
-      // Update debug info immediately
-      const debugElement = document.getElementById('scale-debug');
-      if (debugElement) {
-        debugElement.innerHTML = `Scale boost updated to: ${modelScaleBoost} - applying next frame...`;
-      }
-    }
-
-    // Helper function to add new model with automatic normalization
-    function addNormalizedModel(model, modelType, scene) {
-      const targetSize = modelSizeConfig[modelType] || 0.2;
-      smartNormalizeModelScale(model, targetSize);
-      scene.add(model);
-      console.log(`✅ ${modelType} model added with normalized size: ${targetSize}`);
-      return model;
     }
 
     // Load the low-poly hat model
@@ -1373,11 +1339,6 @@
       }
     });
 
-    document.getElementById('reset-scaling').addEventListener('click', () => {
-      resetHeadDetection();
-      alert('🔄 Scale debug info đã được clear! Dynamic scaling vẫn tiếp tục.');
-    });
-
     // Auto-save settings when values change (with debounce)
     let saveTimeout;
     function autoSaveSettings() {
@@ -1442,17 +1403,6 @@
        document.getElementById('glasses-y-offset').addEventListener('input', (e) => {
          glassesYOffset = parseFloat(e.target.value);
          document.getElementById('glasses-y-offset-value').textContent = glassesYOffset.toFixed(2);
-         autoSaveSettings();
-       });
-
-       // Model scale boost control
-       document.getElementById('model-scale-boost').addEventListener('input', (e) => {
-         modelScaleBoost = parseFloat(e.target.value);
-         document.getElementById('model-scale-boost-value').textContent = modelScaleBoost.toFixed(1);
-         
-         // Apply new scale immediately if models are already scaled
-         applyScaleBoostToModels();
-         
          autoSaveSettings();
        });
   </script>
