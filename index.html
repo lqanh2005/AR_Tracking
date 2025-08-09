@@ -105,12 +105,20 @@
        <label>
          <input type="checkbox" id="show-mesh-irises" checked> Irises (Cyan)
        </label>
-             <label>
-         <input type="checkbox" id="show-axes" checked> Hiển thị Trục Tọa Độ (Oxyz)
-       </label>
+                   <label>
+        <input type="checkbox" id="show-axes" checked> Hiển thị Trục Tọa Độ (Oxyz)
+      </label>
 
-       
-       <div class="setting-group">
+      <h4>🎭 Depth Masking</h4>
+      <label>
+        <input type="checkbox" id="enable-depth-mask" checked> Bật Depth Masking (Stencil Buffer)
+      </label>
+      <label>
+        <input type="checkbox" id="show-face-mask" unchecked> Hiển thị Face Mask (Debug)
+      </label>
+
+      
+      <div class="setting-group">
          <label for="edge-tracking">Edge Tracking Sensitivity:</label>
          <input type="range" id="edge-tracking" min="0.1" max="0.3" step="0.05" value="0.1">
          <span id="edge-tracking-value">0.1</span>
@@ -140,6 +148,38 @@
     </div>
   </div>
   <script type="module">
+    // 🔍 DEBUG: Check if page loads
+    console.log('🚀 Script starting...');
+    
+    // Error handling
+    window.addEventListener('error', (e) => {
+      console.error('❌ Global Error:', e.error);
+      alert('Lỗi JavaScript: ' + e.message);
+    });
+    
+    // Wait for DOM to be ready
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('📄 DOM loaded, starting setup...');
+      initApp();
+    });
+    
+    function initApp() {
+      // Loading indicator
+      document.body.innerHTML += '<div id="loading" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:white; padding:20px; border-radius:10px; z-index:9999;">🔄 Đang tải...</div>';
+      
+      // 🛡️ SAFE EVENT LISTENER HELPER
+      function safeAddEventListener(elementId, event, callback) {
+        const element = document.getElementById(elementId);
+        if (element) {
+          element.addEventListener(event, callback);
+          console.log(`✅ Added listener for ${elementId}`);
+          return true;
+        } else {
+          console.warn(`⚠️ Element ${elementId} not found`);
+          return false;
+        }
+      }
+      
 //#region 
     // MediaPipe Setup
     const videoElement = document.getElementsByClassName('input_video')[0];
@@ -154,8 +194,17 @@
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, 1280 / 720, 0.1, 1000);
     camera.position.z = 5;
-    const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ 
+      canvas: threeCanvas, 
+      alpha: true,
+      stencil: true,  // Bật stencil buffer
+      depth: true     // Bật depth buffer
+    });
     renderer.setSize(1280, 720);
+    
+    // Cấu hình depth testing và stencil buffer
+    renderer.sortObjects = false;  // Tắt auto-sorting để kiểm soát render order
+    renderer.autoClear = false;    // Tắt auto-clear để có thể clear selective
 
     // Add ambient light
     const light = new THREE.AmbientLight(0xffffff);
@@ -165,6 +214,33 @@
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(0, 1, 1);
     scene.add(directionalLight);
+
+    // 🎭 STENCIL BUFFER & DEPTH MASK SETUP
+    // Tạo material cho depth mask (chỉ ghi depth, không ghi color)
+    const depthMaskMaterial = new THREE.MeshBasicMaterial({
+      colorWrite: false,      // Không ghi vào color buffer
+      depthWrite: true,       // Ghi vào depth buffer  
+      depthTest: true,        // Test depth
+      transparent: false,
+      visible: true
+    });
+
+    // Material cho objects cần bị che (sẽ bị depth test)
+    const occludedMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,      // Không ghi depth
+      depthTest: true         // Nhưng vẫn test depth
+    });
+
+    // Biến để lưu face mask geometry
+    let faceMaskGeometry = null;
+    let faceMaskMesh = null;
+    
+    // 🎭 Depth Masking Controls Variables
+    let enableDepthMask = true;
+    let showFaceMaskDebug = false;
 
     // Create reference line (horizontal line perpendicular to nose bridge)
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([
@@ -344,13 +420,7 @@
      let showAxes = true;
 
     
-    // Model size configuration - định nghĩa kích thước chuẩn cho từng loại model
-    const modelSizeConfig = {
-      hat: 2,        // Kích thước chuẩn cho hat
-      glasses: 1.5,   // Kích thước chuẩn cho glasses
-      fallbackHat: 0.2,
-      fallbackGlasses: 0.15
-    };
+    
     
     // Glasses settings
     let glassesYOffset = 0.05;
@@ -418,36 +488,88 @@
       
       console.log('Settings reset to default');
     }
-    function logModelSize(model, label = 'Model') {
+    
+
+//#endregion 
+function logModelSize(model, label = 'Model') {
   const box = new THREE.Box3().setFromObject(model);
   const size = new THREE.Vector3();
   box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
 
   console.log(`📦 Kích thước ${label} sau khi scale:`);
-  console.log(`  x: ${size.x.toFixed(3)}`);
-  console.log(`  y: ${size.y.toFixed(3)}`);
-  console.log(`  z: ${size.z.toFixed(3)}`);
-}
-//#endregion 
-
-    // Enhanced function to normalize model scale and store fixed size
-    function smartNormalizeModelScale(model, targetSize = 0.2, tolerance = 0.05) {
-      const box = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const maxDim = Math.max(size.x, size.y, size.z);
-
-      // Always normalize to exact targetSize
-      const scale = targetSize / maxDim;
-      model.scale.set(scale, scale, scale);
-      
-      // Store the normalized scale for consistent sizing
-      model.userData.normalizedScale = scale;
-      model.userData.targetSize = targetSize;
-      
-      console.log(`✅ Model chuẩn hóa: scale=${scale.toFixed(4)}, targetSize=${targetSize}`);
-      logModelSize(model);
+  console.log(`  x: ${size.x.toFixed(3)}, y: ${size.y.toFixed(3)}, z: ${size.z.toFixed(3)}`);
+  console.log(`  maxDim: ${maxDim.toFixed(3)}`);
+  
+  // Log scale correction info if available
+  if (model.userData) {
+    if (model.userData.originalMaxDim) {
+      console.log(`  originalMaxDim: ${model.userData.originalMaxDim.toFixed(3)}`);
     }
+    if (model.userData.scaleCorrection) {
+      console.log(`  scaleCorrection: ${model.userData.scaleCorrection.toFixed(6)}`);
+    }
+    if (model.userData.normalizedScale) {
+      console.log(`  normalizedScale: ${model.userData.normalizedScale.toFixed(6)}`);
+    }
+  }
+}
+    // Model size configuration - định nghĩa kích thước chuẩn cho từng loại model
+    const modelSizeConfig = {
+      hat: 0.01,        // Kích thước chuẩn cho hat
+      glasses: 1.5,   // Kích thước chuẩn cho glasses
+      fallbackHat: 0.2,
+      fallbackGlasses: 0.15
+    };
+    // Enhanced function to normalize model scale and store fixed size
+  function smartNormalizeModelScale(model, targetSize = 0.2, tolerance = 0.05) {
+  // Đảm bảo bounding box lấy đúng toàn bộ model (bao gồm cả con)
+  model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(model);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const maxDim = Math.max(size.x, size.y, size.z);
+  
+  // Nếu model quá nhỏ hoặc chưa load xong, cảnh báo
+  if (maxDim < 1e-6) {
+    console.warn('⚠️ Model quá nhỏ hoặc chưa load xong, không thể normalize.');
+    return;
+  }
+  
+  // Calculate initial scale to normalize to targetSize
+  let scale = targetSize / maxDim;
+  
+  // 🎯 IMPORTANT: Xử lý model có kích thước gốc quá lớn
+  // Nếu maxDim quá lớn (>= 50), áp dụng scale correction để tránh model quá to
+  let scaleCorrection = 1.0;
+  if (maxDim >= 100) {
+    scaleCorrection = 0.08; // Model rất lớn, giảm mạnh
+  } else if (maxDim >= 50) {
+    scaleCorrection = 0.5; // Model lớn, giảm vừa
+  }
+  
+  // Áp dụng scale correction
+  scale *= scaleCorrection;
+
+  // Nếu scale quá nhỏ, đặt về giá trị tối thiểu để tránh lỗi Three.js
+  // const minScale = 0.001;
+  // if (scale < minScale) {
+  //   console.warn(`⚠️ Scale quá nhỏ (${scale}), đặt về giá trị tối thiểu ${minScale}`);
+  //   scale = minScale;
+  // }
+
+  model.scale.set(scale, scale, scale);
+
+  // Store the normalized scale and correction for consistent sizing
+  model.userData.normalizedScale = scale;
+  model.userData.targetSize = targetSize;
+  model.userData.originalMaxDim = maxDim;
+  model.userData.scaleCorrection = scaleCorrection;
+
+  console.log(`✅ Model chuẩn hóa: scale=${scale.toFixed(6)}, targetSize=${targetSize}, maxDim=${maxDim}, correction=${scaleCorrection}`);
+  logModelSize(model);
+}
 
 
     // Function to apply dynamic scaling per frame
@@ -470,7 +592,21 @@
           scaleMultiplier = 3.5;
       }
       
-      const finalScale = headScale * scaleMultiplier * 1.0 * modelScaleBoost;
+      // 🎯 IMPORTANT: Sử dụng scale correction từ normalize để tránh model quá to
+      let correctionFactor = 1.0;
+      if (model.userData && model.userData.scaleCorrection) {
+        correctionFactor = model.userData.scaleCorrection;
+        
+        // Điều chỉnh thêm multiplier dựa trên kích thước gốc của model
+        const originalMaxDim = model.userData.originalMaxDim || 1;
+        if (originalMaxDim >= 100) {
+          scaleMultiplier *= 0.15; // Giảm thêm 50% cho model rất lớn
+        } else if (originalMaxDim >= 50) {
+          scaleMultiplier *= 0.08; // Giảm thêm 30% cho model lớn
+        }
+      }
+      
+      const finalScale = headScale * scaleMultiplier * correctionFactor * modelScaleBoost;
       
       // Apply scale with smoothing for stable animation
       const targetScale = new THREE.Vector3(finalScale, finalScale, finalScale);
@@ -483,8 +619,9 @@
       if (Math.random() < 0.01) { // 1% của frames
         const debugElement = document.getElementById('scale-debug');
         if (debugElement) {
+          const originalMaxDim = model.userData.originalMaxDim || 'unknown';
           debugElement.innerHTML = `
-            ${modelType}: headScale=${headScale.toFixed(3)}, multiplier=${scaleMultiplier}, boost=${modelScaleBoost}, final=${finalScale.toFixed(3)}
+            ${modelType}: headScale=${headScale.toFixed(3)}, multiplier=${scaleMultiplier.toFixed(2)}, correction=${correctionFactor.toFixed(4)}, originalMaxDim=${originalMaxDim}, final=${finalScale.toFixed(3)}
           `;
         }
       }
@@ -975,6 +1112,115 @@
       }
     }
 
+    // 🎭 FACE MASK GEOMETRY FOR DEPTH MASKING
+    // Tạo geometry mặt nạ từ face landmarks để làm depth mask
+    function createFaceMaskGeometry(landmarks) {
+      if (!landmarks || landmarks.length < 468) {
+        console.warn('Invalid landmarks for face mask');
+        return null;
+      }
+
+      try {
+        // Định nghĩa các điểm contour của khuôn mặt để tạo mặt nạ
+        const faceContourIndices = [
+          // Face outline - viền khuôn mặt
+          10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288,
+          397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136,
+          172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109
+        ];
+
+        // Tạo array các đỉnh từ landmarks
+        const vertices = [];
+        const indices = [];
+
+        // Map landmarks thành Three.js coordinates
+        faceContourIndices.forEach((landmarkIndex, i) => {
+          const landmark = landmarks[landmarkIndex];
+          if (landmark) {
+            // Convert coordinates
+            const pos = mapToThreeJS(landmark.x, landmark.y, landmark.z || -2.5, true);
+            vertices.push(pos.x, pos.y, pos.z);
+          }
+        });
+
+        // Tạo triangulation đơn giản cho face mask
+        // Sử dụng fan triangulation từ center point
+        const centerIndex = Math.floor(faceContourIndices.length / 2);
+        
+        for (let i = 0; i < faceContourIndices.length - 1; i++) {
+          if (i !== centerIndex && i + 1 !== centerIndex) {
+            indices.push(centerIndex, i, i + 1);
+          }
+        }
+        
+        // Close the loop
+        if (faceContourIndices.length > 2) {
+          indices.push(centerIndex, faceContourIndices.length - 1, 0);
+        }
+
+        // Tạo BufferGeometry
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+
+        return geometry;
+
+      } catch (error) {
+        console.error('Error creating face mask geometry:', error);
+        return null;
+      }
+    }
+
+    // Function to scale landmarks from center for face mask
+    function scaleLandmarksFromCenter(landmarks, scaleFactor = 2.0) {
+      // Find the center of the face (using nose tip as reference)
+      const noseTip = landmarks[1]; // Nose tip landmark
+      const faceCenter = {
+        x: noseTip.x,
+        y: noseTip.y,
+        z: noseTip.z || 0
+      };
+
+      // Scale each landmark from the face center
+      const scaledLandmarks = landmarks.map(landmark => {
+        // Calculate offset from center
+        const offsetX = landmark.x - faceCenter.x;
+        const offsetY = landmark.y - faceCenter.y;
+        const offsetZ = (landmark.z || 0) - faceCenter.z;
+
+        // Apply scale factor to offset and add back to center
+        return {
+          x: faceCenter.x + offsetX * scaleFactor,
+          y: faceCenter.y + offsetY * scaleFactor,
+          z: faceCenter.z + offsetZ * scaleFactor,
+          visibility: landmark.visibility
+        };
+      });
+
+      return scaledLandmarks;
+    }
+
+    // Update face mask mesh với geometry mới - SCALED 2X
+    function updateFaceMask(landmarks) {
+      // Scale landmarks gấp đôi cho face mask
+      const scaledLandmarks = scaleLandmarksFromCenter(landmarks, 2.0);
+      const newGeometry = createFaceMaskGeometry(scaledLandmarks);
+      
+      if (newGeometry) {
+        // Nếu đã có face mask mesh, update geometry
+        if (faceMaskMesh) {
+          faceMaskMesh.geometry.dispose(); // Clean up old geometry
+          faceMaskMesh.geometry = newGeometry;
+        } else {
+          // Tạo mesh mới với depth mask material
+          faceMaskMesh = new THREE.Mesh(newGeometry, depthMaskMaterial);
+          faceMaskMesh.renderOrder = -1; // Render trước để ghi depth buffer
+          scene.add(faceMaskMesh);
+        }
+      }
+    }
+
     // Function to map normalized screen coordinates to Three.js world coordinates using camera unprojection
     function mapToThreeJSWorld(xNorm, yNorm, camera, depth = -2.5) {
       // xNorm, yNorm: [0..1] → screen space (MediaPipe)
@@ -1062,6 +1308,46 @@
       };
     }
 
+    // 🎭 DEPTH MASKING RENDER FUNCTION
+    function renderWithDepthMask() {
+      // Kiểm tra xem có bật depth masking không
+      if (!enableDepthMask || !faceMaskMesh) {
+        // Nếu không bật, render bình thường
+        renderer.render(scene, camera);
+        return;
+      }
+
+      // Clear both color and depth buffers
+      renderer.clear(true, true, false); // color=true, depth=true, stencil=false
+      
+      // PASS 1: Render face mask chỉ vào depth buffer (không vào color buffer)
+      // Tạm thời ẩn tất cả objects khác
+      const objectsToHide = [];
+      scene.traverse((child) => {
+        if (child !== faceMaskMesh && child.visible) {
+          objectsToHide.push(child);
+          child.visible = false;
+        }
+      });
+      
+      // Render chỉ face mask để ghi depth buffer
+      faceMaskMesh.visible = true;
+      faceMaskMesh.material = showFaceMaskDebug ? 
+        new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.3 }) :
+        depthMaskMaterial;
+      renderer.render(scene, camera);
+      
+      // Khôi phục visibility các objects khác
+      objectsToHide.forEach(obj => obj.visible = true);
+      
+      // Ẩn face mask nếu không debug, hoặc giữ visible nếu debug
+      faceMaskMesh.visible = showFaceMaskDebug;
+      
+      // PASS 2: Render tất cả objects khác với depth testing
+      // Bây giờ các objects sẽ bị occlude bởi face mask trong depth buffer
+      renderer.render(scene, camera);
+    }
+
     // MediaPipe FaceMesh Configuration
     const faceMesh = new FaceMesh({
       locateFile: (file) => {
@@ -1124,6 +1410,9 @@
           
           // Calculate head fit and position - tracking theo forehead
           const headFit = calculateHeadFit(landmarks);
+          
+          // 🎭 UPDATE FACE MASK for depth masking
+          updateFaceMask(landmarks);
           
           // No need for initial head detection anymore - using dynamic scaling per frame
           
@@ -1279,8 +1568,9 @@
       } finally {
         // ALWAYS restore canvas context in finally block to prevent mirror effect accumulation
         canvasCtx.restore();
-        // Render Three.js scene
-        renderer.render(scene, camera);
+        
+        // 🎭 MULTI-PASS RENDERING với DEPTH MASKING
+        renderWithDepthMask();
       }
     });
 
@@ -1321,18 +1611,20 @@
     });
 
     // Settings panel toggle
-    document.getElementById('settings-toggle').addEventListener('click', () => {
+    // 🛡️ SAFE SETTINGS CONTROLS
+    safeAddEventListener('settings-toggle', 'click', () => {
       const panel = document.getElementById('settings-panel');
-      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      if (panel) {
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      }
     });
 
-    // Settings management buttons
-    document.getElementById('save-settings').addEventListener('click', () => {
+    safeAddEventListener('save-settings', 'click', () => {
       saveSettings();
       alert('✅ Settings đã được lưu!');
     });
 
-    document.getElementById('reset-settings').addEventListener('click', () => {
+    safeAddEventListener('reset-settings', 'click', () => {
       if (confirm('⚠️ Bạn có chắc muốn reset về settings mặc định?')) {
         resetSettings();
         alert('🔄 Settings đã được reset!');
@@ -1353,9 +1645,13 @@
 
 
 
-    document.getElementById('smoothing').addEventListener('input', (e) => {
+    // 🛡️ SAFE SMOOTHING CONTROL
+    safeAddEventListener('smoothing', 'input', (e) => {
       smoothingFactor = parseFloat(e.target.value);
-      document.getElementById('smoothing-value').textContent = smoothingFactor.toFixed(2);
+      const smoothingValue = document.getElementById('smoothing-value');
+      if (smoothingValue) {
+        smoothingValue.textContent = smoothingFactor.toFixed(2);
+      }
       autoSaveSettings();
     });
 
@@ -1363,48 +1659,71 @@
 
 
 
-                   document.getElementById('show-mesh').addEventListener('change', (e) => {
-        showMesh = e.target.checked;
-        autoSaveSettings();
-      });
+    // 🛡️ SAFE MESH CONTROLS
+    safeAddEventListener('show-mesh', 'change', (e) => {
+      showMesh = e.target.checked;
+      autoSaveSettings();
+    });
 
-      document.getElementById('show-mesh-tesselation').addEventListener('change', (e) => {
-        showMeshTesselation = e.target.checked;
-        autoSaveSettings();
-      });
+    safeAddEventListener('show-mesh-tesselation', 'change', (e) => {
+      showMeshTesselation = e.target.checked;
+      autoSaveSettings();
+    });
 
-      document.getElementById('show-mesh-contours').addEventListener('change', (e) => {
-        showMeshContours = e.target.checked;
-        autoSaveSettings();
-      });
+    safeAddEventListener('show-mesh-contours', 'change', (e) => {
+      showMeshContours = e.target.checked;
+      autoSaveSettings();
+    });
 
-      document.getElementById('show-mesh-irises').addEventListener('change', (e) => {
-        showMeshIrises = e.target.checked;
-        autoSaveSettings();
-      });
+    safeAddEventListener('show-mesh-irises', 'change', (e) => {
+      showMeshIrises = e.target.checked;
+      autoSaveSettings();
+    });
 
-           document.getElementById('show-axes').addEventListener('change', (e) => {
-        showAxes = e.target.checked;
-        autoSaveSettings();
-      });
+    safeAddEventListener('show-axes', 'change', (e) => {
+      showAxes = e.target.checked;
+      autoSaveSettings();
+    });
 
+    // 🛡️ SAFE DEPTH MASKING CONTROLS  
+    safeAddEventListener('enable-depth-mask', 'change', (e) => {
+      enableDepthMask = e.target.checked;
+      autoSaveSettings();
+    });
 
+    safeAddEventListener('show-face-mask', 'change', (e) => {
+      showFaceMaskDebug = e.target.checked;
+      autoSaveSettings();
+    });
 
+    // 🛡️ SAFE REMAINING CONTROLS
+    safeAddEventListener('edge-tracking', 'input', (e) => {
+      edgeTrackingSensitivity = parseFloat(e.target.value);
+      const edgeTrackingValue = document.getElementById('edge-tracking-value');
+      if (edgeTrackingValue) {
+        edgeTrackingValue.textContent = edgeTrackingSensitivity.toFixed(2);
+      }
+      autoSaveSettings();
+    });
 
+    // Glasses controls
+    safeAddEventListener('glasses-y-offset', 'input', (e) => {
+      glassesYOffset = parseFloat(e.target.value);
+      const glassesYOffsetValue = document.getElementById('glasses-y-offset-value');
+      if (glassesYOffsetValue) {
+        glassesYOffsetValue.textContent = glassesYOffset.toFixed(2);
+      }
+      autoSaveSettings();
+    });
        
-       document.getElementById('edge-tracking').addEventListener('input', (e) => {
-         edgeTrackingSensitivity = parseFloat(e.target.value);
-         document.getElementById('edge-tracking-value').textContent = edgeTrackingSensitivity.toFixed(2);
-         autoSaveSettings();
-       });
-
-       // Glasses controls
-
-       document.getElementById('glasses-y-offset').addEventListener('input', (e) => {
-         glassesYOffset = parseFloat(e.target.value);
-         document.getElementById('glasses-y-offset-value').textContent = glassesYOffset.toFixed(2);
-         autoSaveSettings();
-       });
-  </script>
+    // 🎉 Setup completed
+    console.log('✅ Setup hoàn tất!');
+    // Remove loading indicator
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.remove();
+    
+    } // End of initApp function
+    
+ </script>
 </body>
 </html>

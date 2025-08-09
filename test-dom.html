@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Test DOM Loading</title>
+</head>
+<body>
+  <h1 id="title">Test DOM</h1>
+  <button id="test-btn">Test Button</button>
+  <div id="result"></div>
+  
+  <script>
+    console.log('Script starting...');
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('DOM loaded!');
+      
+      const btn = document.getElementById('test-btn');
+      const result = document.getElementById('result');
+      
+      if (btn && result) {
+        btn.addEventListener('click', function() {
+          result.innerHTML = '✅ Event listener hoạt động!';
+        });
+        result.innerHTML = '✅ DOM và JavaScript đã sẵn sàng!';
+      } else {
+        console.error('Không tìm thấy elements');
+      }
+    });
+  </script>
+</body>
+</html>
