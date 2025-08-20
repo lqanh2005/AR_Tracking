@@ -278,7 +278,6 @@
     const stencilMat = new THREE.MeshBasicMaterial({ color: 0x000000 });
     stencilMat.colorWrite = false;
     stencilMat.depthWrite = true;
-    stencilMat.side = THREE.DoubleSide; // Đảm bảo silhouette đầy đủ khi quay đầu mạnh
 
     const headOccluder = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 32, 32),
@@ -1502,7 +1501,8 @@ function logModelSize(model, label = 'Model') {
        // Head occluder chỉ ghi stencil, không ghi màu
        headOccluder.visible = true;
        headOccluder.material = stencilMat; // Không ghi màu
-       // Giữ nguyên stencilMat properties đã set ở trên (colorWrite=false, depthWrite=true, side=DoubleSide)
+       headOccluder.material.colorWrite = false;
+       headOccluder.material.depthWrite = false;
        
        renderer.render(headScene, camera);
 
@@ -1558,8 +1558,7 @@ function logModelSize(model, label = 'Model') {
            color: 0x0000ff, 
            transparent: true, 
            opacity: 0.2,
-           wireframe: true,
-           side: THREE.DoubleSide // Giữ DoubleSide cho debug
+           wireframe: true
          });
          headOccluder.material.colorWrite = true;
          renderer.render(headScene, camera);
@@ -1597,10 +1596,7 @@ function logModelSize(model, label = 'Model') {
         // Lật ngang canvas để sửa camera mirror
         canvasCtx.translate(canvasElement.width, 0);
         canvasCtx.scale(-1, 1);
-        // Draw the video frame (only if head replacement is disabled)
-        if (!enableHeadReplacement) {
-          canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-        }
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
           trackingLostFrames = 0; // Reset tracking lost counter
@@ -1823,50 +1819,32 @@ function logModelSize(model, label = 'Model') {
          // trực chuẩn lại để tránh xiên
          yAxis.crossVectors(zAxis, xAxis).normalize();
 
-         // === LẤY HEAD FIT HIỆN TẠI ===
-         const headFit = calculateHeadFit(landmarks);
-         
-         // === PIVOT: Sử dụng true head center (giống modelAxes) ===
-         const trueHeadCenter = calculateTrueHeadCenter(landmarks);
-         let headCenter;
-         
-         if (trueHeadCenter) {
-           // Sử dụng true head center đã được tính toán chính xác
-           headCenter = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
-         } else {
-           // Fallback: tâm gương mặt sơ bộ từ landmarks
-           const centerFace = new THREE.Vector3()
-             .add(v3(L_earL)).add(v3(L_earR)).add(v3(L_fore)).add(v3(L_chin)).multiplyScalar(0.25);
-           headCenter = centerFace.clone();
-         }
+         // Tâm gương mặt sơ bộ
+         const centerFace = new THREE.Vector3()
+           .add(v3(L_earL)).add(v3(L_earR)).add(v3(L_fore)).add(v3(L_chin)).multiplyScalar(0.25);
 
-         // === ĐẨY VỀ SAU GÁY: offset pivot lùi theo zAxis 2-4cm thực tế ===
-         const offset = 0.05; // 2-4cm thực tế (tuỳ scale thế giới)
-         headCenter.add(zAxis.clone().multiplyScalar(-offset));
+         // Kích thước thực tế (đơn vị world của bạn)
+         const headW = distW(L_earL, L_earR);   // ngang tai–tai
+         const headH = distW(L_fore,  L_chin);  // cao trán–cằm
+         // Ước lượng độ sâu hộp sọ (gáy) ~ 0.95–1.10 × headW (tuỳ camera & face size)
+         const headD = headW * 1.05;            // tăng nếu còn hở gáy
 
-         // === POSITION: Gán trực tiếp cho headProxy ===
-         headProxy.position.copy(headCenter);
-         
-         // === ROTATION: Matrix4().makeBasis() → Quaternion → gán cho headProxy ===
-         const rotMat = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-         headProxy.quaternion.setFromRotationMatrix(rotMat);
+         // Tâm hộp sọ: lùi vào **nửa** độ sâu dọc theo -Z (vì Z đang hướng ra trước)
+         const headCenter = centerFace.clone().add(zAxis.clone().multiplyScalar(-0.5 * headD));
 
-         // === SCALE NON-UNIFORM: Tách khỏi mũ/kính, tối ưu cho "ôm gáy" ===
-         // Base scale từ headFit (khác với mũ/kính dùng Math.min)
-         const baseScale = Math.max(headFit.width, headFit.height) * 0.8; // Base nhỏ hơn mũ
-         
-         // Hệ số non-uniform để "ôm gáy" tốt hơn mũ/kính
-         const kx = 0.95 * headOccluderSizeMultiplier;  // Nhỏ hơn mũ (3.8) để không quá to
-         const ky = 1.05 * headOccluderSizeMultiplier;  // Vừa phải
-         const kz = 1.6 * headOccluderSizeMultiplier;   // Lớn hơn nhiều để "ôm gáy" tốt
-         
-         const scaleX = baseScale * kx;
-         const scaleY = baseScale * ky;
-         const scaleZ = baseScale * kz;
-         
-         headOccluder.scale.set(scaleX, scaleY, scaleZ);
+         // Gán pose CHO HEAD PROXY (đừng gán theo mũ)
+         headProxy.position.lerp(headCenter, 0.35);   // làm mượt
+         const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+         const qTarget = new THREE.Quaternion().setFromRotationMatrix(basis);
+         headProxy.quaternion.slerp(qTarget, 0.35);
 
-         // === VẬT LIỆU OCCLUDER: Double side để đảm bảo silhouette đầy đủ ===
+         // Scale ellipsoid (sphere gốc radius = 0.5 ⇒ scale ≈ đường kính mong muốn)
+         const kW = 0.98 * headOccluderSizeMultiplier, 
+               kH = 1.08 * headOccluderSizeMultiplier, 
+               kD = 1.14 * headOccluderSizeMultiplier; // tăng kD nếu còn hở gáy
+         headOccluder.scale.set(headW * kW, headH * kH, headD * kD);
+
+         // Vật liệu occluder: chỉ ghi depth – đừng ghi màu, double side
          headOccluder.material.colorWrite = false;
          headOccluder.material.depthWrite = true;
          headOccluder.material.depthTest  = true;
@@ -1875,21 +1853,11 @@ function logModelSize(model, label = 'Model') {
          
          // Debug log
          if (Math.random() < 0.02) { // Log 2% frames để không spam
-           const hatScale = Math.min(headFit.width, headFit.height) * 3.8; // So sánh với mũ
            console.log('🔵 Professional Head Occluder:', {
              center: headCenter,
-             pivotType: trueHeadCenter ? 'trueHeadCenter' : 'fallback',
              scale: headOccluder.scale,
-             headFit: headFit,
-             baseScale: baseScale.toFixed(3),
-             comparison: {
-               hatScale: hatScale.toFixed(3),
-               occluderScale: Math.max(scaleX, scaleY, scaleZ).toFixed(3),
-               ratio: (Math.max(scaleX, scaleY, scaleZ) / hatScale).toFixed(2)
-             },
-             dimensions: { width: headFit.width.toFixed(3), height: headFit.height.toFixed(3), depth: headFit.depth.toFixed(3) },
-             axes: { x: xAxis, y: yAxis, z: zAxis },
-             multipliers: { kx: kx.toFixed(2), ky: ky.toFixed(2), kz: kz.toFixed(2) }
+             dimensions: { width: headW.toFixed(3), height: headH.toFixed(3), depth: headD.toFixed(3) },
+             axes: { x: xAxis, y: yAxis, z: zAxis }
            });
          }
        }

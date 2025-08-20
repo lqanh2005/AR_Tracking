@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Test Stencil Buffer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+  </style>
+</head>
+<body>
+<script>
+// Renderer phải bật stencil
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// Scene + Camera
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 100);
+camera.position.set(0, 1.5, 5);
+
+// Light
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5, 10, 5);
+scene.add(light);
+
+// ----- Hat Pass 1 (Mask) -----
+const hatGeo = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 32);
+hatGeo.rotateX(Math.PI / 2);
+const hatMaskMat = new THREE.MeshBasicMaterial({
+    colorWrite: false,            // không vẽ màu
+    depthWrite: false,            // không ghi depth
+    stencilWrite: true,
+    stencilRef: 1,
+    stencilFunc: THREE.AlwaysStencilFunc,
+    stencilZPass: THREE.ReplaceStencilOp
+});
+const hatMask = new THREE.Mesh(hatGeo, hatMaskMat);
+hatMask.position.y = 1.6;
+hatMask.renderOrder = 0;
+scene.add(hatMask);
+
+// ----- Head -----
+const headGeo = new THREE.SphereGeometry(1, 32, 32);
+const headMat = new THREE.MeshStandardMaterial({
+    color: 0xffcc99,
+    stencilWrite: true,
+    stencilRef: 1,
+    stencilFunc: THREE.NotEqualStencilFunc
+});
+const head = new THREE.Mesh(headGeo, headMat);
+head.position.y = 1;
+head.renderOrder = 1;
+scene.add(head);
+
+// ----- Hat Pass 2 (Visible) -----
+const hatMat = new THREE.MeshStandardMaterial({
+    color: 0x222222, // màu mũ
+    metalness: 0.3,
+    roughness: 0.8,
+    stencilWrite: false // không đụng stencil nữa
+});
+const hatVisible = new THREE.Mesh(hatGeo, hatMat);
+hatVisible.position.copy(hatMask.position);
+hatVisible.renderOrder = 2;
+scene.add(hatVisible);
+
+// Animate
+function animate() {
+    requestAnimationFrame(animate);
+    
+    // Xoay để test
+    hatMask.rotation.y += 0.01;
+    hatVisible.rotation.copy(hatMask.rotation);
+    
+    // Clear và render
+    renderer.clear(true, true, true); // color, depth, stencil
+    renderer.render(scene, camera);
+}
+animate();
+
+console.log('🎩 Stencil buffer test: Hat sẽ che khuất head khi xoay!');
+</script>
+</body>
+</html>
