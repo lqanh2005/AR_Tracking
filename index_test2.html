@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Face Tracking - Mũ & Râu 3D</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            overflow: hidden;
+        }
+        
+        .container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+                 #video {
+             position: absolute;
+             top: 0;
+             left: 0;
+             width: 100%;
+             height: 100%;
+             object-fit: cover;
+         }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        #debug {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+        
+        .controls h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        
+        .control-group input {
+            width: 100%;
+            margin-bottom: 5px;
+        }
+        
+        .status {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+        
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 18px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="canvas"></canvas>
+        <canvas id="debug"></canvas>
+        
+        <div class="controls">
+            <h3>🎭 AR Face Tracking</h3>
+            
+            <div class="control-group">
+                <label>Mũ (Hat):</label>
+                <input type="checkbox" id="showHat" checked>
+                <label>Vị trí mũ (0.55-0.75):</label>
+                <input type="range" id="hatPosition" min="0.55" max="0.75" step="0.01" value="0.65">
+                <span id="hatPosValue">0.65</span>
+            </div>
+            
+            <div class="control-group">
+                <label>Râu (Beard):</label>
+                <input type="checkbox" id="showBeard" checked>
+                <label>Vị trí râu (0.1-0.2):</label>
+                <input type="range" id="beardPosition" min="0.1" max="0.2" step="0.01" value="0.15">
+                <span id="beardPosValue">0.15</span>
+            </div>
+            
+                         <div class="control-group">
+                 <label>Độ mượt (Responsiveness):</label>
+                 <input type="range" id="smoothing" min="0.1" max="0.9" step="0.1" value="0.7">
+                 <span id="smoothingValue">0.7</span>
+             </div>
+            
+                         <div class="control-group">
+                 <label>Che khuất (Occlusion):</label>
+                 <input type="checkbox" id="occlusion" checked>
+             </div>
+             
+             <div class="control-group">
+                 <label>Hiển thị landmarks:</label>
+                 <input type="checkbox" id="showLandmarks" checked>
+             </div>
+             
+             <div class="control-group">
+                 <button id="reloadModels" style="width: 100%; padding: 8px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                     🔄 Load lại Models
+                 </button>
+             </div>
+             
+             <div class="control-group">
+                 <button id="testPosition" style="width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                     🎯 Test Vị trí Model
+                 </button>
+             </div>
+             
+             <div class="control-group">
+                 <button id="debugModel" style="width: 100%; padding: 8px; background: #FF9800; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                     🔍 Debug Model Info
+                 </button>
+             </div>
+        </div>
+        
+        <div class="status" id="status">Đang khởi tạo...</div>
+        <div class="loading" id="loading">Đang tải MediaPipe...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466862/drawing_utils.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+        // Khởi tạo biến toàn cục
+        let faceMesh;
+        let camera;
+        let canvas;
+        let ctx;
+        let scene, renderer, camera3D;
+                 let hatModel, beardModel;
+         let faceMesh3D;
+         let prevHeadPose = null;
+         let prevHeadScale = 1;
+         let modelLoaded = false; // Theo dõi trạng thái load model
+        
+        // Các điểm landmark quan trọng
+        const LANDMARKS = {
+            LEFT_EAR: 234,
+            RIGHT_EAR: 454,
+            FOREHEAD: 10,
+            CHIN: 152,
+            NOSE_BRIDGE: 168
+        };
+        
+                 // Cấu hình
+         const config = {
+             hatPosition: 2,
+             beardPosition: 0.15,
+             smoothing: 0.7,
+             occlusion: true,
+             showHat: true,
+             showBeard: true,
+             showLandmarks: true,
+             // Scale calibration
+             refEarDistanceOfHat: 0.15, // Khoảng cách tai-tai tham chiếu cho mũ (mét)
+             refEarDistanceOfBeard: 0.15, // Khoảng cách tai-tai tham chiếu cho râu (mét)
+             hatScaleMul: 1.0,
+             beardScaleMul: 1.0
+         };
+
+        // Khởi tạo MediaPipe Face Mesh
+        async function initFaceMesh() {
+            faceMesh = new FaceMesh({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
+                }
+            });
+
+                         faceMesh.setOptions({
+                 maxNumFaces: 1,
+                 refineLandmarks: true,
+                 minDetectionConfidence: 0.5,
+                 minTrackingConfidence: 0.5,
+                 selfieMode: false
+             });
+
+            faceMesh.onResults(onResults);
+            
+            // Khởi tạo camera
+            camera = new Camera(document.getElementById('video'), {
+                onFrame: async () => {
+                    await faceMesh.send({image: document.getElementById('video')});
+                },
+                width: 1280,
+                height: 720
+            });
+            
+            await camera.start();
+            document.getElementById('loading').style.display = 'none';
+        }
+
+                 // Xử lý kết quả từ MediaPipe
+         function onResults(results) {
+             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                 const landmarks = results.multiFaceLandmarks[0];
+                 const worldLandmarks = results.multiFaceWorldLandmarks?.[0] ?? null;
+
+                 // Ước lượng pose đầu (có thể sử dụng screen landmarks nếu world landmarks không có)
+                 const headPose = estimateHeadPose(landmarks, worldLandmarks);
+                
+                                 // Cập nhật 3D models
+                 if (headPose) {
+                     update3DModels(headPose);
+                     const coordType = headPose.useWorldCoords ? 'World' : 'Screen';
+                     document.getElementById('status').textContent = `Đã phát hiện khuôn mặt (${coordType} coords)`;
+                 } else {
+                     document.getElementById('status').textContent = 'Đang xử lý landmarks...';
+                 }
+                 
+                 // Vẽ landmarks (tùy chọn)
+                 if (config.showLandmarks) {
+                     drawLandmarks(results.multiFaceLandmarks);
+                 }
+            } else {
+                document.getElementById('status').textContent = 'Không tìm thấy khuôn mặt';
+            }
+        }
+
+                 // Ước lượng pose đầu từ landmarks
+        function toScene(p){
+            const aspect = window.innerWidth / window.innerHeight;
+            return { x: (p.x - 0.5) * 2 * aspect, y: (0.5 - p.y) * 2, z: 0 };
+        }
+
+        function estimateHeadPose(landmarks, worldLandmarks) {
+            // Screen → scene
+            const LE = toScene(landmarks[LANDMARKS.LEFT_EAR]);
+            const RE = toScene(landmarks[LANDMARKS.RIGHT_EAR]);
+            const FH = toScene(landmarks[LANDMARKS.FOREHEAD]);
+            const CH = toScene(landmarks[LANDMARKS.CHIN]);
+
+            // Hướng đầu (lấy từ world để quay model cho chuẩn)
+            const xW = normalize(subtract(worldLandmarks[LANDMARKS.RIGHT_EAR],
+                                            worldLandmarks[LANDMARKS.LEFT_EAR]));
+            const yW = normalize(subtract(worldLandmarks[LANDMARKS.CHIN],
+                                            worldLandmarks[LANDMARKS.FOREHEAD]));
+            const zW = normalize(cross(xW, yW));
+            const yAxisW = cross(zW, xW);
+
+            // Hướng "lên" theo **mặt phẳng ảnh** để đặt anchor (không trộn hệ)
+            const y2D = normalize(subtract(CH, FH));
+
+            const headCenter = midpoint(LE, RE);
+            const headSize   = distance(LE, RE);
+
+            // Anchor trong cùng 1 hệ toạ độ
+            const headCenterOffset = add(headCenter, multiply(y2D, 0.10 * headSize));
+            const hatAnchor   = add(headCenterOffset, multiply(y2D,  config.hatPosition  * headSize));
+            const beardAnchor = add(CH,               multiply(y2D, -config.beardPosition * headSize));
+
+            // Quaternion từ world axes để xoay mũ/râu
+            const m = new THREE.Matrix4().makeBasis(
+                new THREE.Vector3(xW.x, xW.y, xW.z),
+                new THREE.Vector3(yAxisW.x, yAxisW.y, yAxisW.z),
+                new THREE.Vector3(zW.x, zW.y, zW.z)
+            );
+            const q = new THREE.Quaternion().setFromRotationMatrix(m);
+
+            // Tùy bạn giữ thang đo theo world (ổn định nhất)
+            const earToEarWorld = distance(worldLandmarks[LANDMARKS.LEFT_EAR],
+                                            worldLandmarks[LANDMARKS.RIGHT_EAR]);
+
+            return { headCenter: headCenterOffset, hatAnchor, beardAnchor,
+                    rotation: q, scale: headSize, earToEarWorld,
+                    landmarks: { leftEar: LE, rightEar: RE, forehead: FH, chin: CH } };
+            }
+
+                 // Khởi tạo Three.js scene
+        function initThreeJS() {
+             scene = new THREE.Scene();
+             scene.background = null;
+             
+             // Camera 3D - Orthographic để khớp với không gian màn hình 0..1
+             const aspect = window.innerWidth / window.innerHeight;
+             camera3D = new THREE.OrthographicCamera(-aspect, aspect, 1, -1, 0.1, 1000);
+             camera3D.position.z = 1;
+            
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: document.getElementById('canvas'),
+                alpha: true,
+                antialias: true 
+            });
+            renderer.setClearColor(0x000000, 0);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            
+            // Ánh sáng
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(0, 1, 1);
+            scene.add(directionalLight);
+            
+            // Tạo mesh khuôn mặt cho occlusion
+            if (config.occlusion) {
+                createFaceOcclusionMesh();
+            }
+            
+            // Tạo mô hình mũ và râu đơn giản
+            createSimpleModels();
+            
+            animate();
+        }
+
+        // Tạo mesh occlusion cho khuôn mặt
+        function createFaceOcclusionMesh() {
+            // Dọn cái cũ (nếu có)
+            if (faceMesh3D) {
+                scene.remove(faceMesh3D);
+                faceMesh3D.geometry?.dispose();
+                faceMesh3D.material?.dispose();
+                faceMesh3D = null;
+            }
+
+            // Geometry tạm (sau này thay bằng face mesh 468 điểm)
+            const faceGeometry = new THREE.SphereGeometry(1, 32, 32);
+
+            // Material depth-only: che khuất nhưng KHÔNG tô màu
+            const faceMaterial = new THREE.MeshBasicMaterial({
+                colorWrite: false,
+                depthWrite: true,
+                depthTest: true
+            });
+
+            faceMesh3D = new THREE.Mesh(faceGeometry, faceMaterial);
+            faceMesh3D.renderOrder = 0;
+            scene.add(faceMesh3D);
+        }
+
+
+                 // Tạo mô hình mũ và râu đơn giản
+        function createSimpleModels() {
+            // Mũ
+            const hatGeometry = new THREE.ConeGeometry(0.5, 0.3, 8);
+            const hatMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+            hatModel = new THREE.Mesh(hatGeometry, hatMaterial);
+            hatModel.visible = config.showHat;
+            hatModel.renderOrder = 1;     // <-- gán sau khi đã có hatModel
+            scene.add(hatModel);
+
+            // Râu
+            const beardGeometry = new THREE.BoxGeometry(0.4, 0.2, 0.1);
+            const beardMaterial = new THREE.MeshLambertMaterial({ color: 0x654321 });
+            beardModel = new THREE.Mesh(beardGeometry, beardMaterial);
+            beardModel.visible = config.showBeard;
+            beardModel.renderOrder = 1;   // <-- gán sau khi đã có beardModel
+            scene.add(beardModel);
+
+            // Load GLTF models thực tế
+            loadGLTFModels();
+        }
+
+         
+         // Load GLTF models thực tế
+         function loadGLTFModels() {
+             const loader = new THREE.GLTFLoader();
+             
+             console.log('Bắt đầu load GLTF models...');
+             
+             // Load mũ từ file GLB
+             loader.load('assets/low_poly_hat/hat.gltf', (gltf) => {
+                 console.log('Đã load thành công mô hình mũ GLTF:', gltf);
+                 
+                 const hatGLTF = gltf.scene;
+                 hatGLTF.scale.setScalar(0.1); // Scale mặc định
+                 hatGLTF.visible = config.showHat;
+                 
+                 // Dọn dẹp model cũ
+                 if (hatModel) {
+                     scene.remove(hatModel);
+                     if (hatModel.geometry) hatModel.geometry.dispose();
+                     if (hatModel.material) hatModel.material.dispose();
+                 }
+                 
+                 hatModel = hatGLTF;
+                 hatModel.renderOrder = 1;
+                 scene.add(hatModel);
+                 
+                 // Đặt vị trí test ban đầu
+                 hatModel.position.set(0, 0, 0);
+                 
+                                   console.log('Đã thay thế mô hình mũ bằng GLTF');
+                  console.log('Hat model position:', hatModel.position);
+                  console.log('Hat model scale:', hatModel.scale);
+                  
+                  // Set flag và cập nhật status
+                  modelLoaded = true;
+                  document.getElementById('status').textContent = 'Đã load mô hình mũ GLTF thành công!';
+                 
+             }, (progress) => {
+                 console.log('Đang load mô hình mũ:', (progress.loaded / progress.total * 100).toFixed(1) + '%');
+             }, (error) => {
+                 console.error('Lỗi load mô hình mũ GLTF:', error);
+                 console.log('Sử dụng mô hình mũ đơn giản');
+             });
+             
+             // TODO: Load râu khi có file beard.glb
+             // loader.load('model/beard.glb', (gltf) => {
+             //     // Tương tự như mũ
+             // });
+         }
+
+                 // Cập nhật vị trí và rotation của mô hình 3D
+         function update3DModels(headPose) {
+             if (!headPose) return;
+             
+             // Smoothing - sử dụng t = 1 - smoothing để đảo ngược logic
+             const t = 1 - config.smoothing;
+             
+             if (prevHeadPose) {
+                 headPose.headCenter = lerp(prevHeadPose.headCenter, headPose.headCenter, t);
+                 headPose.hatAnchor = lerp(prevHeadPose.hatAnchor, headPose.hatAnchor, t);
+                 headPose.beardAnchor = lerp(prevHeadPose.beardAnchor, headPose.beardAnchor, t);
+                 headPose.rotation = slerp(prevHeadPose.rotation, headPose.rotation, t);
+                 headPose.scale = lerp(prevHeadPose.scale, headPose.scale, t);
+                 headPose.earToEarWorld = lerp(prevHeadPose.earToEarWorld, headPose.earToEarWorld, t);
+             }
+             
+             // Tính scale chính xác dựa trên ear-to-ear distance
+             const hatScale = (headPose.earToEarWorld / config.refEarDistanceOfHat) * config.hatScaleMul;
+             const beardScale = (headPose.earToEarWorld / config.refEarDistanceOfBeard) * config.beardScaleMul;
+             
+                           // Cập nhật mũ
+              if (hatModel && config.showHat && modelLoaded) {
+                  hatModel.position.set(headPose.hatAnchor.x, headPose.hatAnchor.y, headPose.hatAnchor.z);
+                  hatModel.quaternion.copy(headPose.rotation);
+                  
+                  // Đảm bảo scale không quá nhỏ
+                  const finalScale = Math.max(hatScale, 0.01);
+                  hatModel.scale.setScalar(finalScale);
+                  
+                  // Debug: chỉ log khi cần thiết
+                  if (Math.random() < 0.01) { // Chỉ log 1% thời gian
+                      console.log('Hat position:', headPose.hatAnchor.x, headPose.hatAnchor.y, headPose.hatAnchor.z);
+                      console.log('Hat scale:', finalScale);
+                  }
+              }
+             
+             // Cập nhật râu
+             if (beardModel && config.showBeard) {
+                 beardModel.position.set(headPose.beardAnchor.x, headPose.beardAnchor.y, headPose.beardAnchor.z);
+                 beardModel.quaternion.copy(headPose.rotation);
+                 beardModel.scale.setScalar(beardScale);
+             }
+             
+             // Cập nhật face occlusion mesh
+             if (faceMesh3D && config.occlusion) {
+                 faceMesh3D.position.copy(headPose.headCenter);
+                 faceMesh3D.quaternion.copy(headPose.rotation);
+                 faceMesh3D.scale.setScalar(headPose.scale * 0.8);
+             }
+             
+             prevHeadPose = headPose;
+         }
+
+                 // Vẽ landmarks trên canvas debug riêng biệt
+         function drawLandmarks(landmarks) {
+             if (!landmarks || landmarks.length === 0) return;
+             
+             const debugCanvas = document.getElementById('debug');
+             const ctx = debugCanvas.getContext('2d');
+             
+             // Đảm bảo canvas có kích thước đúng với DPR
+             const dpr = window.devicePixelRatio || 1;
+             const rect = debugCanvas.getBoundingClientRect();
+             
+             if (debugCanvas.width !== rect.width * dpr || debugCanvas.height !== rect.height * dpr) {
+                 debugCanvas.width = rect.width * dpr;
+                 debugCanvas.height = rect.height * dpr;
+                 ctx.scale(dpr, dpr);
+             }
+             
+             ctx.clearRect(0, 0, rect.width, rect.height);
+             
+             // Vẽ các điểm quan trọng
+             const importantPoints = [
+                 LANDMARKS.LEFT_EAR, LANDMARKS.RIGHT_EAR,
+                 LANDMARKS.FOREHEAD, LANDMARKS.CHIN, LANDMARKS.NOSE_BRIDGE
+             ];
+             
+             ctx.strokeStyle = '#00ff00';
+             ctx.lineWidth = 2;
+             ctx.fillStyle = '#ff0000';
+             
+             importantPoints.forEach(pointIndex => {
+                 const point = landmarks[0][pointIndex];
+                 if (point) {
+                     ctx.beginPath();
+                     ctx.arc(point.x * rect.width, point.y * rect.height, 5, 0, 2 * Math.PI);
+                     ctx.fill();
+                 }
+             });
+         }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera3D);
+        }
+
+        // Utility functions
+        function normalize(v) {
+            const length = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+            return { x: v.x / length, y: v.y / length, z: v.z / length };
+        }
+
+        function subtract(a, b) {
+            return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+        }
+
+        function add(a, b) {
+            return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+        }
+
+        function multiply(v, scalar) {
+            return { x: v.x * scalar, y: v.y * scalar, z: v.z * scalar };
+        }
+
+        function cross(a, b) {
+            return {
+                x: a.y * b.z - a.z * b.y,
+                y: a.z * b.x - a.x * b.z,
+                z: a.x * b.y - a.y * b.x
+            };
+        }
+
+        function midpoint(a, b) {
+            return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+        }
+
+        function distance(a, b) {
+            const dx = a.x - b.x;
+            const dy = a.y - b.y;
+            const dz = a.z - b.z;
+            return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        function lerp(a, b, t) {
+            return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+        }
+
+        function slerp(a, b, t) {
+            const quat = new THREE.Quaternion();
+            quat.slerpQuaternions(a, b, t);
+            return quat;
+        }
+
+        
+
+        // Event listeners
+        document.getElementById('hatPosition').addEventListener('input', (e) => {
+            config.hatPosition = parseFloat(e.target.value);
+            document.getElementById('hatPosValue').textContent = e.target.value;
+        });
+
+        document.getElementById('beardPosition').addEventListener('input', (e) => {
+            config.beardPosition = parseFloat(e.target.value);
+            document.getElementById('beardPosValue').textContent = e.target.value;
+        });
+
+        document.getElementById('smoothing').addEventListener('input', (e) => {
+            config.smoothing = parseFloat(e.target.value);
+            document.getElementById('smoothingValue').textContent = e.target.value;
+        });
+
+        document.getElementById('showHat').addEventListener('change', (e) => {
+            config.showHat = e.target.checked;
+            if (hatModel) hatModel.visible = config.showHat;
+        });
+
+        document.getElementById('showBeard').addEventListener('change', (e) => {
+            config.showBeard = e.target.checked;
+            if (beardModel) beardModel.visible = config.showBeard;
+        });
+
+                 document.getElementById('occlusion').addEventListener('change', (e) => {
+             config.occlusion = e.target.checked;
+             if (faceMesh3D) faceMesh3D.visible = config.occlusion;
+         });
+         
+         document.getElementById('showLandmarks').addEventListener('change', (e) => {
+             config.showLandmarks = e.target.checked;
+             if (!config.showLandmarks) {
+                 const debugCanvas = document.getElementById('debug');
+                 const ctx = debugCanvas.getContext('2d');
+                 const rect = debugCanvas.getBoundingClientRect();
+                 ctx.clearRect(0, 0, rect.width, rect.height);
+             }
+         });
+         
+         document.getElementById('reloadModels').addEventListener('click', () => {
+             console.log('Reloading models...');
+             document.getElementById('status').textContent = 'Đang load lại models...';
+             loadGLTFModels();
+         });
+         
+         document.getElementById('testPosition').addEventListener('click', () => {
+             console.log('Testing model position...');
+             if (hatModel) {
+                 console.log('Hat model position:', hatModel.position);
+                 console.log('Hat model scale:', hatModel.scale);
+                 console.log('Hat model visible:', hatModel.visible);
+                 
+                 // Test đặt model ở giữa màn hình
+                 hatModel.position.set(0, 0, 0);
+                 hatModel.scale.setScalar(0.1);
+                 console.log('Đã đặt model ở giữa màn hình (0,0,0)');
+             }
+         });
+         
+         document.getElementById('debugModel').addEventListener('click', () => {
+             console.log('=== DEBUG MODEL INFO ===');
+             console.log('Model loaded:', modelLoaded);
+             if (hatModel) {
+                 console.log('Hat model exists:', true);
+                 console.log('Hat model position:', hatModel.position);
+                 console.log('Hat model scale:', hatModel.scale);
+                 console.log('Hat model visible:', hatModel.visible);
+                 console.log('Hat model in scene:', scene.children.includes(hatModel));
+                 console.log('Hat model renderOrder:', hatModel.renderOrder);
+                 
+                 // Kiểm tra camera
+                 console.log('Camera position:', camera3D.position);
+                 console.log('Camera near/far:', camera3D.near, camera3D.far);
+                 console.log('Camera left/right:', camera3D.left, camera3D.right);
+                 console.log('Camera top/bottom:', camera3D.top, camera3D.bottom);
+             } else {
+                 console.log('Hat model exists:', false);
+             }
+             console.log('========================');
+         });
+
+                 // Resize handler
+         window.addEventListener('resize', () => {
+             const aspect = window.innerWidth / window.innerHeight;
+             camera3D.left = -aspect;
+             camera3D.right = aspect;
+             camera3D.top = 1;
+             camera3D.bottom = -1;
+             camera3D.updateProjectionMatrix();
+             renderer.setSize(window.innerWidth, window.innerHeight);
+             
+             // Cập nhật debug canvas với DPR
+             const debugCanvas = document.getElementById('debug');
+             const dpr = window.devicePixelRatio || 1;
+             const rect = debugCanvas.getBoundingClientRect();
+             debugCanvas.width = rect.width * dpr;
+             debugCanvas.height = rect.height * dpr;
+         });
+
+        // Khởi tạo ứng dụng
+        async function init() {
+            try {
+                await initFaceMesh();
+                initThreeJS();
+                document.getElementById('status').textContent = 'Sẵn sàng! Di chuyển khuôn mặt để thấy hiệu ứng';
+            } catch (error) {
+                console.error('Lỗi khởi tạo:', error);
+                document.getElementById('status').textContent = 'Lỗi: ' + error.message;
+            }
+        }
+
+        // Bắt đầu ứng dụng
+        init();
+    </script>
+</body>
+</html>

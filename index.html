@@ -93,6 +93,36 @@
       <span id="glasses-y-offset-value">0.05</span>
     </label>
 
+    <label>
+      <input type="checkbox" id="enable-occlusion" checked>
+      Bật Mask Occlusion
+    </label>
+
+    <label>
+      <input type="checkbox" id="glasses-ignore-occlusion" checked>
+      Kính bỏ qua Occlusion
+    </label>
+
+    <label>
+      <input type="checkbox" id="use-face-mesh-occluder" checked>
+      Sử dụng Face Mesh cho Occluder
+    </label>
+    
+    <label>
+      <input type="checkbox" id="force-sphere-occluder">
+      Bắt buộc dùng Hình cầu (Test)
+    </label>
+
+    <label>
+      <input type="checkbox" id="use-face-shape-occluder" checked>
+      Sử dụng Hình dạng Mặt thực tế
+    </label>
+
+    <label>
+      Head Occluder Smoothing: <input type="range" id="occluder-smoothing" min="0.01" max="0.5" step="0.01" value="0.3">
+      <span id="occluder-smoothing-value">0.3</span>
+    </label>
+
                                      <label>
       Hat Y Offset (from Forehead): <input type="range" id="hat-y-offset" min="-0.3" max="0.1" step="0.01" value="-0.1">
       <span id="hat-y-offset-value">-0.1</span>
@@ -125,7 +155,7 @@
         <input type="checkbox" id="show-face-mask" unchecked> Hiển thị Face Mask (Debug)
       </label>
       <label>
-        <input type="checkbox" id="show-head-occluder" unchecked> Hiển thị Head Occluder (Debug)
+        <input type="checkbox" id="show-head-occluder"> Hiển thị Head Occluder (Debug)
       </label>
       
       <div class="setting-group">
@@ -259,6 +289,7 @@
     // Tạo separate scenes để control stencil passes
     const headScene = new THREE.Scene();
     const hatScene = new THREE.Scene();
+    const glassesScene = new THREE.Scene(); // Scene riêng cho glasses
     
     // Copy lights sang cả 2 scenes
     const headLight = light.clone();
@@ -270,6 +301,11 @@
     const hatDirectionalLight = directionalLight.clone();
     hatScene.add(hatLight);
     hatScene.add(hatDirectionalLight);
+    
+    const glassesLight = light.clone();
+    const glassesDirectionalLight = directionalLight.clone();
+    glassesScene.add(glassesLight);
+    glassesScene.add(glassesDirectionalLight);
 
     // ---- Head Occluder với Manual Stencil ----
     const headProxy = new THREE.Group();
@@ -280,7 +316,178 @@
     stencilMat.depthWrite = true;
     stencilMat.side = THREE.DoubleSide; // Đảm bảo silhouette đầy đủ khi quay đầu mạnh
 
-    const headOccluder = new THREE.Mesh(
+    // Tạo head occluder từ face mesh hoặc hình cầu
+    let faceMeshOccluder = null;
+    
+    // Tạo face mesh occluder từ landmarks
+    function createFaceMeshOccluder(landmarks) {
+      if (!landmarks || landmarks.length < 468) return null;
+      
+      // Tính toán center của face để làm pivot point
+      const faceCenter = new THREE.Vector3();
+      for (let i = 0; i < landmarks.length; i++) {
+        const lm = landmarks[i];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        faceCenter.add(pos);
+      }
+      faceCenter.divideScalar(landmarks.length);
+      
+      // Tạo mesh phức tạp hơn bằng cách kết hợp nhiều phần của khuôn mặt
+      const vertices = [];
+      const indices = [];
+      let vertexIndex = 0;
+      
+      // === PHẦN 1: FACE CONTOUR (viền mặt) ===
+      // Sử dụng FACEMESH_FACE_OVAL để tạo viền mặt
+      const faceOvalIndices = FACEMESH_FACE_OVAL;
+      for (let i = 0; i < faceOvalIndices.length; i++) {
+        const lmIndex = faceOvalIndices[i];
+        const lm = landmarks[lmIndex];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        vertices.push(pos.x - faceCenter.x, pos.y - faceCenter.y, pos.z - faceCenter.z);
+      }
+      
+      // Tạo triangles cho face contour
+      for (let i = 0; i < faceOvalIndices.length - 2; i++) {
+        indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+        vertexIndex++;
+      }
+      vertexIndex += 2; // Điều chỉnh index cho phần tiếp theo
+      
+      // === PHẦN 2: FACE TESSELATION (lưới mặt) ===
+      // Sử dụng FACEMESH_TESSELATION để tạo lưới chi tiết
+      const tessellationIndices = FACEMESH_TESSELATION;
+      const startIndex = vertexIndex;
+      
+      // Thêm vertices từ tessellation
+      for (let i = 0; i < tessellationIndices.length; i++) {
+        const lmIndex = tessellationIndices[i];
+        const lm = landmarks[lmIndex];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        vertices.push(pos.x - faceCenter.x, pos.y - faceCenter.y, pos.z - faceCenter.z);
+      }
+      
+      // Thêm indices cho tessellation
+      for (let i = 0; i < tessellationIndices.length; i += 3) {
+        indices.push(
+          startIndex + i,
+          startIndex + i + 1,
+          startIndex + i + 2
+        );
+      }
+      
+      // === PHẦN 3: EXPANDED FACE (mở rộng để che tốt hơn) ===
+      // Tạo thêm vertices mở rộng ra ngoài để che tốt hơn
+      const expansionFactor = 1.1; // Mở rộng 10%
+      const expandedVertices = [];
+      
+      // Mở rộng face contour
+      for (let i = 0; i < faceOvalIndices.length; i++) {
+        const lmIndex = faceOvalIndices[i];
+        const lm = landmarks[lmIndex];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        
+        // Tính vector từ center đến landmark
+        const direction = new THREE.Vector3(
+          pos.x - faceCenter.x,
+          pos.y - faceCenter.y,
+          pos.z - faceCenter.z
+        );
+        
+        // Mở rộng theo hướng này
+        const expandedPos = new THREE.Vector3(
+          faceCenter.x + direction.x * expansionFactor,
+          faceCenter.y + direction.y * expansionFactor,
+          faceCenter.z + direction.z * expansionFactor
+        );
+        
+        expandedVertices.push(
+          expandedPos.x - faceCenter.x,
+          expandedPos.y - faceCenter.y,
+          expandedPos.z - faceCenter.z
+        );
+      }
+      
+      // Thêm expanded vertices
+      const expandedStartIndex = vertices.length;
+      vertices.push(...expandedVertices);
+      
+      // Tạo triangles kết nối face contour với expanded contour
+      for (let i = 0; i < faceOvalIndices.length; i++) {
+        const nextI = (i + 1) % faceOvalIndices.length;
+        indices.push(
+          i, // Face contour vertex
+          expandedStartIndex + i, // Expanded vertex
+          expandedStartIndex + nextI // Next expanded vertex
+        );
+        indices.push(
+          i, // Face contour vertex
+          expandedStartIndex + nextI, // Next expanded vertex
+          nextI // Next face contour vertex
+        );
+      }
+      
+      // Tạo geometry
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      
+      const mesh = new THREE.Mesh(geometry, stencilMat);
+      mesh.position.copy(faceCenter); // Đặt vị trí center
+      
+      return mesh;
+    }
+
+    // Tạo head occluder từ hình dạng mặt thực tế (không phải hình cầu)
+    function createFaceShapeOccluder(landmarks) {
+      if (!landmarks || landmarks.length < 468) return null;
+      
+      // Tính toán center của face
+      const faceCenter = new THREE.Vector3();
+      for (let i = 0; i < landmarks.length; i++) {
+        const lm = landmarks[i];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        faceCenter.add(pos);
+      }
+      faceCenter.divideScalar(landmarks.length);
+      
+      // Sử dụng FACEMESH_FACE_OVAL để tạo hình dạng mặt
+      const faceOvalIndices = FACEMESH_FACE_OVAL;
+      const vertices = [];
+      const indices = [];
+      
+      // Tạo vertices từ face oval
+      for (let i = 0; i < faceOvalIndices.length; i++) {
+        const lmIndex = faceOvalIndices[i];
+        const lm = landmarks[lmIndex];
+        const pos = mapToThreeJS(lm.x, lm.y, lm.z, true);
+        vertices.push(pos.x - faceCenter.x, pos.y - faceCenter.y, pos.z - faceCenter.z);
+      }
+      
+      // Tạo triangles để tạo mặt phẳng từ face oval
+      for (let i = 1; i < faceOvalIndices.length - 1; i++) {
+        indices.push(0, i, i + 1);
+      }
+      
+      // Tạo geometry
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      geometry.setIndex(indices);
+      geometry.computeVertexNormals();
+      
+      const mesh = new THREE.Mesh(geometry, stencilMat);
+      mesh.position.copy(faceCenter);
+      
+      return mesh;
+    }
+
+    // Tạo head occluder mặc định (hình cầu)
+    let headOccluder;
+    let faceShapeOccluder = null;
+    
+    // Tạo head occluder ban đầu (luôn dùng hình cầu ban đầu)
+    headOccluder = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 32, 32),
       stencilMat
     );
@@ -292,6 +499,12 @@
     let enableDepthMask = true;
      let enableHeadReplacement = false;
      let enableHeadCenterForGlasses = false; // Option to use head center for glasses
+    let enableOcclusion = true; // Bật/tắt mask occlusion
+    let glassesIgnoreOcclusion = true; // Kính có bỏ qua occlusion không
+    let useFaceMeshOccluder = true; // Sử dụng face mesh thực tế cho occluder
+    let forceSphereOccluder = false; // Bắt buộc dùng hình cầu để test
+    let useFaceShapeOccluder = true; // Sử dụng hình dạng mặt thực tế
+    let occluderSmoothing = 0.3; // Smoothing cho head occluder
     let showFaceMaskDebug = false;
      let showHeadOccluderDebug = false;
      let headOccluderSizeMultiplier = 1.2;
@@ -516,6 +729,14 @@
         
         // Load model scale boost
         modelScaleBoost = settings.modelScaleBoost || 1.0;
+        
+                 // Load occlusion settings
+        enableOcclusion = settings.enableOcclusion !== undefined ? settings.enableOcclusion : true;
+        glassesIgnoreOcclusion = settings.glassesIgnoreOcclusion !== undefined ? settings.glassesIgnoreOcclusion : true;
+        useFaceMeshOccluder = settings.useFaceMeshOccluder !== undefined ? settings.useFaceMeshOccluder : true;
+        forceSphereOccluder = settings.forceSphereOccluder !== undefined ? settings.forceSphereOccluder : false;
+        useFaceShapeOccluder = settings.useFaceShapeOccluder !== undefined ? settings.useFaceShapeOccluder : true;
+        occluderSmoothing = settings.occluderSmoothing || 0.3;
       }
     }
 
@@ -532,7 +753,13 @@
         glassesYOffset: glassesYOffset,
          hatYOffset: hatYOffset,
          modelScaleBoost: modelScaleBoost,
-         enableHeadReplacement: enableHeadReplacement
+         enableHeadReplacement: enableHeadReplacement,
+         enableOcclusion: enableOcclusion,
+         glassesIgnoreOcclusion: glassesIgnoreOcclusion,
+         useFaceMeshOccluder: useFaceMeshOccluder,
+         forceSphereOccluder: forceSphereOccluder,
+         useFaceShapeOccluder: useFaceShapeOccluder,
+         occluderSmoothing: occluderSmoothing
       };
       localStorage.setItem('hatTrackingSettings', JSON.stringify(settings));
       console.log('Settings saved:', settings);
@@ -553,6 +780,14 @@
       
       // Reset model scale boost
       modelScaleBoost = 1.0;
+      
+             // Reset occlusion settings
+      enableOcclusion = true;
+      glassesIgnoreOcclusion = true;
+      useFaceMeshOccluder = true;
+      forceSphereOccluder = false;
+      useFaceShapeOccluder = true;
+      occluderSmoothing = 0.3;
       
       // Reset head detection for re-scaling
       resetHeadDetection();
@@ -784,13 +1019,13 @@ function logModelSize(model, label = 'Model') {
     // Tạo model tạm thời ngay lập tức để test
     glassesModel = createFallbackGlasses();
     smartNormalizeModelScale(glassesModel, modelSizeConfig.fallbackGlasses); // Normalize fallback model
-    hatScene.add(glassesModel); // Thêm vào hatScene
+    glassesScene.add(glassesModel); // Thêm vào glassesScene
     
     loader.load(
       'assets/low_poly_hat/sun_glasses.glb',
       (gltf) => {
         // Remove temporary model
-        hatScene.remove(glassesModel);
+        glassesScene.remove(glassesModel);
         // Add real model
         glassesModel = gltf.scene;
         
@@ -800,7 +1035,7 @@ function logModelSize(model, label = 'Model') {
         // Apply initial rotation to fix mirror effect - flip the model 180 degrees around Y-axis
         glassesModel.rotation.set(0, 0, 0);
         // glassesModel.rotation.y = Math.PI;
-        hatScene.add(glassesModel); // Thêm vào hatScene
+        glassesScene.add(glassesModel); // Thêm vào glassesScene
         console.log('✅ Glasses model loaded, scale normalized - will use dynamic scaling per frame');
       },
       (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
@@ -1458,9 +1693,12 @@ function logModelSize(model, label = 'Model') {
 
               // 🎭 HEAD REPLACEMENT STENCIL BUFFER RENDER FUNCTION
      function renderWithHeadReplacement() {
-       if (!enableDepthMask) {
-         // Nếu không bật, render hatScene bình thường
+       if (!enableOcclusion) {
+         // Nếu không bật occlusion, render cả hatScene và glassesScene bình thường
          renderer.render(hatScene, camera);
+         if (glassesModel) {
+           renderer.render(glassesScene, camera);
+         }
         return;
       }
 
@@ -1485,6 +1723,9 @@ function logModelSize(model, label = 'Model') {
          renderer.state.buffers.stencil.setOp(gl.KEEP, gl.KEEP, gl.KEEP);
          
          renderer.render(hatScene, camera);
+         if (glassesModel) {
+           renderer.render(glassesScene, camera);
+         }
          renderer.state.buffers.stencil.setTest(false);
          return;
        }
@@ -1563,6 +1804,12 @@ function logModelSize(model, label = 'Model') {
          });
          headOccluder.material.colorWrite = true;
          renderer.render(headScene, camera);
+       }
+       
+       // === PASS 4: Glasses - render riêng nếu bỏ qua occlusion ===
+       if (glassesIgnoreOcclusion && glassesModel) {
+         renderer.state.buffers.stencil.setTest(false); // Tắt stencil test cho glasses
+         renderer.render(glassesScene, camera); // Render glasses scene riêng biệt
        }
        
        // Disable stencil test
@@ -1795,6 +2042,131 @@ function logModelSize(model, label = 'Model') {
 
      // 🔵 HEAD OCCLUDER - Professional Implementation
      if (headOccluder && landmarks) {
+       // === SỬ DỤNG FACE MESH THỰC TẾ ===
+       if (useFaceMeshOccluder && !forceSphereOccluder && !useFaceShapeOccluder && landmarks.length >= 468) {
+         // Tạo face mesh occluder từ landmarks thực tế
+         const newFaceMeshOccluder = createFaceMeshOccluder(landmarks);
+         
+         if (newFaceMeshOccluder) {
+           // Thay thế head occluder cũ bằng face mesh mới
+           if (faceMeshOccluder) {
+             headProxy.remove(faceMeshOccluder);
+           }
+           
+           faceMeshOccluder = newFaceMeshOccluder;
+           faceMeshOccluder.name = 'faceMeshOccluder';
+           faceMeshOccluder.material = stencilMat;
+           
+           // Reset position và rotation để face mesh di chuyển theo headProxy
+           faceMeshOccluder.position.set(0, 0, 0);
+           faceMeshOccluder.quaternion.set(0, 0, 0, 1);
+           
+           headProxy.add(faceMeshOccluder);
+           
+           // Ẩn head occluder hình cầu
+           headOccluder.visible = false;
+           faceMeshOccluder.visible = true;
+           
+           // Cập nhật headProxy position và rotation cho face mesh occluder
+           const trueHeadCenter = calculateTrueHeadCenter(landmarks);
+           if (trueHeadCenter) {
+             const headCenter = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
+             headProxy.position.lerp(headCenter, occluderSmoothing);
+             
+             // Áp dụng rotation cho headProxy
+             const rotMatrix = calculateHeadRotationMatrix(landmarks);
+             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+             headProxy.quaternion.slerp(targetQuat, occluderSmoothing);
+           }
+           
+           // Debug log
+           if (Math.random() < 0.01) { // Log 1% frames
+             console.log('🔵 Face Mesh Occluder:', {
+               vertices: faceMeshOccluder.geometry.attributes.position.count,
+               triangles: faceMeshOccluder.geometry.index ? faceMeshOccluder.geometry.index.count / 3 : 0,
+               smoothing: occluderSmoothing,
+               position: faceMeshOccluder.position,
+               headProxyPosition: headProxy.position
+             });
+           }
+           
+           return; // Thoát sớm nếu sử dụng face mesh
+         }
+       }
+       
+       // === SỬ DỤNG FACE SHAPE OCCLUDER ===
+       if (useFaceShapeOccluder && !forceSphereOccluder && landmarks.length >= 468) {
+         // Tạo face shape occluder từ landmarks thực tế
+         const newFaceShapeOccluder = createFaceShapeOccluder(landmarks);
+         
+         if (newFaceShapeOccluder) {
+           // Thay thế head occluder cũ bằng face shape mới
+           if (faceShapeOccluder) {
+             headProxy.remove(faceShapeOccluder);
+           }
+           
+           faceShapeOccluder = newFaceShapeOccluder;
+           faceShapeOccluder.name = 'faceShapeOccluder';
+           faceShapeOccluder.material = stencilMat;
+           
+           // Reset position và rotation để face shape di chuyển theo headProxy
+           faceShapeOccluder.position.set(0, 0, 0);
+           faceShapeOccluder.quaternion.set(0, 0, 0, 1);
+           
+           headProxy.add(faceShapeOccluder);
+           
+           // Ẩn head occluder hình cầu và face mesh
+           headOccluder.visible = false;
+           if (faceMeshOccluder) faceMeshOccluder.visible = false;
+           faceShapeOccluder.visible = true;
+           
+           // Cập nhật headProxy position và rotation cho face shape occluder
+           const trueHeadCenter = calculateTrueHeadCenter(landmarks);
+           if (trueHeadCenter) {
+             const headCenter = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
+             headProxy.position.lerp(headCenter, occluderSmoothing);
+             
+             // Áp dụng rotation cho headProxy
+             const rotMatrix = calculateHeadRotationMatrix(landmarks);
+             const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMatrix);
+             headProxy.quaternion.slerp(targetQuat, occluderSmoothing);
+           }
+           
+           // Debug log
+           if (Math.random() < 0.01) { // Log 1% frames
+             console.log('🔵 Face Shape Occluder:', {
+               vertices: faceShapeOccluder.geometry.attributes.position.count,
+               triangles: faceShapeOccluder.geometry.index ? faceShapeOccluder.geometry.index.count / 3 : 0,
+               position: faceShapeOccluder.position,
+               headProxyPosition: headProxy.position
+             });
+           }
+           
+           return; // Thoát sớm nếu sử dụng face shape
+         }
+       }
+       
+               // === FALLBACK: SỬ DỤNG HÌNH CẦU (LOGIC CŨ) ===
+        // Ẩn face mesh và face shape occluder nếu có
+        if (faceMeshOccluder) {
+          faceMeshOccluder.visible = false;
+        }
+        if (faceShapeOccluder) {
+          faceShapeOccluder.visible = false;
+        }
+        headOccluder.visible = true;
+        
+                 console.log('🔄 Sử dụng hình cầu occluder (fallback hoặc force)');
+         
+         // Debug: Log position của head occluder
+         if (Math.random() < 0.05) { // Log 5% frames
+           console.log('🔵 Head Occluder Position:', {
+             headProxy: headProxy.position,
+             headOccluder: headOccluder.position,
+             visible: headOccluder.visible
+           });
+         }
+       
        // === helpers ===
        const v3 = (lm) => new THREE.Vector3(
          mapToThreeJS(lm.x, lm.y, lm.z, true).x,
@@ -1844,12 +2216,13 @@ function logModelSize(model, label = 'Model') {
          const offset = 0.05; // 2-4cm thực tế (tuỳ scale thế giới)
          headCenter.add(zAxis.clone().multiplyScalar(-offset));
 
-         // === POSITION: Gán trực tiếp cho headProxy ===
-         headProxy.position.copy(headCenter);
+         // === POSITION: Gán trực tiếp cho headProxy với smoothing ===
+         headProxy.position.lerp(headCenter, occluderSmoothing);
          
-         // === ROTATION: Matrix4().makeBasis() → Quaternion → gán cho headProxy ===
+         // === ROTATION: Matrix4().makeBasis() → Quaternion → gán cho headProxy với smoothing ===
          const rotMat = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-         headProxy.quaternion.setFromRotationMatrix(rotMat);
+         const targetQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
+         headProxy.quaternion.slerp(targetQuat, occluderSmoothing);
 
          // === SCALE NON-UNIFORM: Tách khỏi mũ/kính, tối ưu cho "ôm gáy" ===
          // Base scale từ headFit (khác với mũ/kính dùng Math.min)
@@ -1975,6 +2348,15 @@ function logModelSize(model, label = 'Model') {
     // Initialize head occluder size UI
     document.getElementById('head-occluder-size').value = headOccluderSizeMultiplier;
     document.getElementById('head-occluder-size-value').textContent = headOccluderSizeMultiplier.toFixed(1);
+    
+    // Initialize occlusion UI values
+    document.getElementById('enable-occlusion').checked = enableOcclusion;
+    document.getElementById('glasses-ignore-occlusion').checked = glassesIgnoreOcclusion;
+    document.getElementById('use-face-mesh-occluder').checked = useFaceMeshOccluder;
+    document.getElementById('force-sphere-occluder').checked = forceSphereOccluder;
+    document.getElementById('use-face-shape-occluder').checked = useFaceShapeOccluder;
+    document.getElementById('occluder-smoothing').value = occluderSmoothing;
+    document.getElementById('occluder-smoothing-value').textContent = occluderSmoothing.toFixed(2);
 
     // Start the camera
     const cameraFeed = new Camera(videoElement, {
@@ -2127,6 +2509,46 @@ function logModelSize(model, label = 'Model') {
       const hatYOffsetValue = document.getElementById('hat-y-offset-value');
       if (hatYOffsetValue) {
         hatYOffsetValue.textContent = hatYOffset.toFixed(2);
+      }
+      autoSaveSettings();
+    });
+    
+    // Occlusion controls
+    safeAddEventListener('enable-occlusion', 'change', (e) => {
+      enableOcclusion = e.target.checked;
+      console.log('🎭 Occlusion:', enableOcclusion ? 'BẬT' : 'TẮT');
+      autoSaveSettings();
+    });
+    
+    safeAddEventListener('glasses-ignore-occlusion', 'change', (e) => {
+      glassesIgnoreOcclusion = e.target.checked;
+      console.log('👓 Glasses ignore occlusion:', glassesIgnoreOcclusion ? 'BẬT' : 'TẮT');
+      autoSaveSettings();
+    });
+    
+    safeAddEventListener('use-face-mesh-occluder', 'change', (e) => {
+      useFaceMeshOccluder = e.target.checked;
+      console.log('🔵 Face Mesh Occluder:', useFaceMeshOccluder ? 'BẬT' : 'TẮT');
+      autoSaveSettings();
+    });
+    
+    safeAddEventListener('force-sphere-occluder', 'change', (e) => {
+      forceSphereOccluder = e.target.checked;
+      console.log('🔴 Force Sphere Occluder:', forceSphereOccluder ? 'BẬT' : 'TẮT');
+      autoSaveSettings();
+    });
+    
+    safeAddEventListener('use-face-shape-occluder', 'change', (e) => {
+      useFaceShapeOccluder = e.target.checked;
+      console.log('🔵 Face Shape Occluder:', useFaceShapeOccluder ? 'BẬT' : 'TẮT');
+      autoSaveSettings();
+    });
+    
+    safeAddEventListener('occluder-smoothing', 'input', (e) => {
+      occluderSmoothing = parseFloat(e.target.value);
+      const occluderSmoothingValue = document.getElementById('occluder-smoothing-value');
+      if (occluderSmoothingValue) {
+        occluderSmoothingValue.textContent = occluderSmoothing.toFixed(2);
       }
       autoSaveSettings();
     });

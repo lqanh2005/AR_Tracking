@@ -133,6 +133,12 @@
         <input type="range" id="head-occluder-size" min="0.8" max="2.0" step="0.1" value="1.2">
         <span id="head-occluder-size-value">1.2</span>
       </div>
+      
+      <div class="setting-group">
+        <label for="head-proxy-scale-sensitivity">Head Proxy Scale Sensitivity:</label>
+        <input type="range" id="head-proxy-scale-sensitivity" min="0.1" max="2.0" step="0.1" value="0.8">
+        <span id="head-proxy-scale-sensitivity-value">0.8</span>
+      </div>
 
       
       <div class="setting-group">
@@ -293,7 +299,8 @@
      let enableHeadCenterForGlasses = false; // Option to use head center for glasses
     let showFaceMaskDebug = false;
      let showHeadOccluderDebug = false;
-     let headOccluderSizeMultiplier = 1.2;
+     let headOccluderSizeMultiplier = 0.34;
+     let headProxyScaleSensitivity = 2; // Độ nhạy scale của head proxy
 
     // Create reference line (horizontal line perpendicular to nose bridge)
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([
@@ -515,6 +522,9 @@
         
         // Load model scale boost
         modelScaleBoost = settings.modelScaleBoost || 1.0;
+        
+        // Load head proxy scale sensitivity
+        headProxyScaleSensitivity = settings.headProxyScaleSensitivity || 0.8;
       }
     }
 
@@ -531,7 +541,8 @@
         glassesYOffset: glassesYOffset,
          hatYOffset: hatYOffset,
          modelScaleBoost: modelScaleBoost,
-         enableHeadReplacement: enableHeadReplacement
+         enableHeadReplacement: enableHeadReplacement,
+         headProxyScaleSensitivity: headProxyScaleSensitivity
       };
       localStorage.setItem('hatTrackingSettings', JSON.stringify(settings));
       console.log('Settings saved:', settings);
@@ -552,6 +563,9 @@
       
       // Reset model scale boost
       modelScaleBoost = 1.0;
+      
+      // Reset head proxy scale sensitivity
+      headProxyScaleSensitivity = 0.8;
       
       // Reset head detection for re-scaling
       resetHeadDetection();
@@ -589,7 +603,7 @@ function logModelSize(model, label = 'Model') {
 }
   // Model size configuration - định nghĩa kích thước chuẩn cho từng loại model
   const modelSizeConfig = {
-      hat: 0.01,        // Kích thước chuẩn cho hat
+      hat: 1,        // Kích thước chuẩn cho hat
       glasses: 1.5,   // Kích thước chuẩn cho glasses
       fallbackHat: 0.2,
       fallbackGlasses: 0.15
@@ -674,17 +688,17 @@ function logModelSize(model, label = 'Model') {
       const headScale = Math.min(headFit.width, headFit.height);
       let scaleMultiplier;
       
-      // Different scale multipliers for different model types
-      switch(modelType) {
-        case 'hat':
-          scaleMultiplier = 3.8;
-          break;
-        case 'glasses':
-          scaleMultiplier = 1.6;
-          break;
-        default:
-          scaleMultiplier = 3.5;
-      }
+             // Different scale multipliers for different model types
+       switch(modelType) {
+         case 'hat':
+           scaleMultiplier = 4;
+           break;
+         case 'glasses':
+           scaleMultiplier = 1.2;
+           break;
+         default:
+           scaleMultiplier = 3.5;
+       }
       
       // 🎯 IMPORTANT: Sử dụng scale correction từ normalize để tránh model quá to
       let correctionFactor = 1.0;
@@ -693,6 +707,7 @@ function logModelSize(model, label = 'Model') {
         
         // Điều chỉnh thêm multiplier dựa trên kích thước gốc của model
         const originalMaxDim = model.userData.originalMaxDim || 1;
+        console.log("originalMaxDim la: " + originalMaxDim);
         if (originalMaxDim >= 100) {
           scaleMultiplier *= 0.15; // Giảm thêm cho model rất lớn
         } else if (originalMaxDim >= 50) {
@@ -700,7 +715,7 @@ function logModelSize(model, label = 'Model') {
         } else if (originalMaxDim < 0.1) {
           scaleMultiplier *= 2.0; // Tăng thêm cho model rất nhỏ
         } else if (originalMaxDim < 1) {
-          scaleMultiplier *= 1.5; // Tăng thêm cho model nhỏ
+          scaleMultiplier *= 6.5; // Tăng thêm cho model nhỏ
         } else if (originalMaxDim < 10) {
           scaleMultiplier *= 1.2; // Tăng nhẹ cho model hơi nhỏ
         }
@@ -1717,7 +1732,7 @@ function logModelSize(model, label = 'Model') {
               
               if (trueHeadCenter) {
                 // Use head center for X and Z (stable rotation pivot)
-                hatPos = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
+                hatPos = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z + 0.08, true);
                 
                 // Override Y position with forehead position for proper hat placement
                 const foreheadLandmark = landmarks[10]; // Forehead center
@@ -1730,7 +1745,7 @@ function logModelSize(model, label = 'Model') {
                 }
               } else {
                 // Fallback to old method
-                hatPos = mapToThreeJS(headFit.center.x, headFit.center.y, headFit.center.z, true);
+                hatPos = mapToThreeJS(headFit.center.x, headFit.center.y, headFit.center.z + 0.08, true);
                 hatPos.y -= 0.15; // Original offset for old method
                 console.warn('⚠️ Fallback to old positioning method');
               }
@@ -1831,12 +1846,22 @@ function logModelSize(model, label = 'Model') {
 
          // Tâm hộp sọ: lùi vào **nửa** độ sâu dọc theo -Z (vì Z đang hướng ra trước)
          const headCenter = centerFace.clone().add(zAxis.clone().multiplyScalar(-0.5 * headD));
-
-         // Gán pose CHO HEAD PROXY (đừng gán theo mũ)
+         
+                  // Gán pose CHO HEAD PROXY (đừng gán theo mũ)
+         headProxy.position.z += 0.08;
          headProxy.position.lerp(headCenter, 0.35);   // làm mượt
          const basis = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
          const qTarget = new THREE.Quaternion().setFromRotationMatrix(basis);
          headProxy.quaternion.slerp(qTarget, 0.35);
+
+                   // 🎯 SCALE HEAD PROXY CỐ ĐỊNH 1.2 LẦN KÍCH THƯỚC MẶT
+          // Tính scale factor cố định 1.2 lần kích thước mặt
+          const faceSize = (3.14 * (3*(headH + headW)/2 - Math.sqrt((3*headH+headW)*(headH+3*headD)/4))); // Lấy kích thước nhỏ nhất của mặt
+          const fixedScaleFactor = faceSize * 1.1; // Luôn scale 1.2 lần
+          
+          // Áp dụng scale cố định cho headProxy
+          const targetScale = new THREE.Vector3(fixedScaleFactor, fixedScaleFactor, fixedScaleFactor);
+          headProxy.scale.lerp(targetScale, 0.35); // Smoothing nhẹ
 
          // Scale ellipsoid (sphere gốc radius = 0.5 ⇒ scale ≈ đường kính mong muốn)
          const kW = 0.98 * headOccluderSizeMultiplier, 
@@ -1851,15 +1876,18 @@ function logModelSize(model, label = 'Model') {
          headOccluder.material.side       = THREE.DoubleSide;
          headOccluder.renderOrder = -2; // vẽ sớm
          
-         // Debug log
-         if (Math.random() < 0.02) { // Log 2% frames để không spam
-           console.log('🔵 Professional Head Occluder:', {
-             center: headCenter,
-             scale: headOccluder.scale,
-             dimensions: { width: headW.toFixed(3), height: headH.toFixed(3), depth: headD.toFixed(3) },
-             axes: { x: xAxis, y: yAxis, z: zAxis }
-           });
-         }
+                   // Debug log
+          if (Math.random() < 0.02) { // Log 2% frames để không spam
+            console.log('🔵 Professional Head Occluder:', {
+              center: headCenter,
+              scale: headOccluder.scale,
+              headProxyScale: headProxy.scale,
+              faceSize: faceSize.toFixed(3),
+              fixedScaleFactor: fixedScaleFactor.toFixed(3),
+              dimensions: { width: headW.toFixed(3), height: headH.toFixed(3), depth: headD.toFixed(3) },
+              axes: { x: xAxis, y: yAxis, z: zAxis }
+            });
+          }
        }
      }
 
@@ -1870,7 +1898,7 @@ function logModelSize(model, label = 'Model') {
       const headCenterPos = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
       modelAxes.position.copy(headCenterPos);
     } else {
-  modelAxes.position.copy(hatModel.position);
+      modelAxes.position.copy(hatModel.position);
     }
   } else {
     modelAxes.position.copy(hatModel.position);
@@ -1886,11 +1914,11 @@ function logModelSize(model, label = 'Model') {
     // Option to use head center for glasses too (more stable rotation)
     const trueHeadCenter = calculateTrueHeadCenter(landmarks);
     if (trueHeadCenter && enableHeadCenterForGlasses) {
-      glassesPos = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z, true);
-      glassesPos.y += 0.1; // Offset up to eye level from head center
+      glassesPos = mapToThreeJS(trueHeadCenter.x, trueHeadCenter.y, trueHeadCenter.z-0.15, true);
+      glassesPos.y += 0.07; // Offset up to eye level from head center
     } else {
       // Default: track with eyes
-      glassesPos = mapToThreeJS(facialLandmarks.eye.x, facialLandmarks.eye.y, facialLandmarks.eye.z);
+      glassesPos = mapToThreeJS(facialLandmarks.eye.x, facialLandmarks.eye.y, facialLandmarks.eye.z -0.15);
     }
     
     glassesPos.y += glassesYOffset; // Use configurable Y offset
@@ -1943,6 +1971,10 @@ function logModelSize(model, label = 'Model') {
     // Initialize head occluder size UI
     document.getElementById('head-occluder-size').value = headOccluderSizeMultiplier;
     document.getElementById('head-occluder-size-value').textContent = headOccluderSizeMultiplier.toFixed(1);
+    
+    // Initialize head proxy scale sensitivity UI
+    document.getElementById('head-proxy-scale-sensitivity').value = headProxyScaleSensitivity;
+    document.getElementById('head-proxy-scale-sensitivity-value').textContent = headProxyScaleSensitivity.toFixed(1);
 
     // Start the camera
     const cameraFeed = new Camera(videoElement, {
@@ -2065,6 +2097,15 @@ function logModelSize(model, label = 'Model') {
       const sizeValue = document.getElementById('head-occluder-size-value');
       if (sizeValue) {
         sizeValue.textContent = headOccluderSizeMultiplier.toFixed(1);
+      }
+      autoSaveSettings();
+    });
+
+    safeAddEventListener('head-proxy-scale-sensitivity', 'input', (e) => {
+      headProxyScaleSensitivity = parseFloat(e.target.value);
+      const sensitivityValue = document.getElementById('head-proxy-scale-sensitivity-value');
+      if (sensitivityValue) {
+        sensitivityValue.textContent = headProxyScaleSensitivity.toFixed(1);
       }
       autoSaveSettings();
     });
