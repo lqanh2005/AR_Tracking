@@ -76,7 +76,7 @@
   <button id="settings-toggle">⚙️</button>
   
   <div id="settings-panel">
-    <h4>🎩 Điều chỉnh Mũ</h4>
+    <h4> Điều chỉnh Mũ</h4>
 
 
 
@@ -86,7 +86,7 @@
     </label>
 
 
-    <h4>👓 Điều chỉnh Kính</h4>
+    <h4> Điều chỉnh Kính</h4>
 
     <label>
       Glasses Y Offset: <input type="range" id="glasses-y-offset" min="-0.2" max="0.2" step="0.01" value="0.05">
@@ -114,7 +114,7 @@
         <input type="checkbox" id="show-axes" checked> Hiển thị Trục Tọa Độ (Oxyz)
       </label>
 
-      <h4>🎭 Depth Masking</h4>
+      <h4> Depth Masking</h4>
       <label>
         <input type="checkbox" id="enable-depth-mask" checked> Bật Depth Masking (Stencil Buffer)
       </label>
@@ -147,11 +147,11 @@
          <span id="edge-tracking-value">0.1</span>
        </div>
                  <div id="debug-info" style="margin-top: 10px; font-size: 12px; color: #ccc;">
-           <div>🎯 Face Mesh Components:</div>
+           <div>• Face Mesh Components:</div>
            <div>• Tesselation: Lưới chính (Xanh nhạt)</div>
            <div>• Contours: Viền khuôn mặt (Xanh dương)</div>
            <div>• Irises: Mống mắt (Cyan)</div>
-           <div>🎯 Landmarks được xác định:</div>
+           <div>• Landmarks được xác định:</div>
            <div>• Mũi: Điểm 1, 168 (Cyan)</div>
            <div>• Mắt: Điểm 33, 263 (Tím)</div>
            <div>• Lông mày: Điểm 70, 300 (Vàng)</div>
@@ -171,12 +171,11 @@
     </div>
   </div>
   <script type="module">
-    // 🔍 DEBUG: Check if page loads
-    console.log('🚀 Script starting...');
+    console.log('Script starting...');
     
     // Error handling
     window.addEventListener('error', (e) => {
-      console.error('❌ Global Error:', e.error);
+      console.error('Global Error:', e.error);
       alert('Lỗi JavaScript: ' + e.message);
     });
     
@@ -190,15 +189,14 @@
       // Loading indicator
       document.body.innerHTML += '<div id="loading" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:white; padding:20px; border-radius:10px; z-index:9999;">🔄 Đang tải...</div>';
       
-      // 🛡️ SAFE EVENT LISTENER HELPER
       function safeAddEventListener(elementId, event, callback) {
         const element = document.getElementById(elementId);
         if (element) {
           element.addEventListener(event, callback);
-          console.log(`✅ Added listener for ${elementId}`);
+          console.log(`Added listener for ${elementId}`);
           return true;
         } else {
-          console.warn(`⚠️ Element ${elementId} not found`);
+          console.warn(`Element ${elementId} not found`);
           return false;
         }
       }
@@ -578,38 +576,9 @@
     
 
 //#endregion 
-function logModelSize(model, label = 'Model') {
-  const box = new THREE.Box3().setFromObject(model);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const maxDim = Math.max(size.x, size.y, size.z);
-
-  console.log(`📦 Kích thước ${label} sau khi scale:`);
-  console.log(`  x: ${size.x.toFixed(3)}, y: ${size.y.toFixed(3)}, z: ${size.z.toFixed(3)}`);
-  console.log(`  maxDim: ${maxDim.toFixed(3)}`);
   
-  // Log scale correction info if available
-  if (model.userData) {
-    if (model.userData.originalMaxDim) {
-      console.log(`  originalMaxDim: ${model.userData.originalMaxDim.toFixed(3)}`);
-    }
-    if (model.userData.scaleCorrection) {
-      console.log(`  scaleCorrection: ${model.userData.scaleCorrection.toFixed(6)}`);
-    }
-    if (model.userData.normalizedScale) {
-      console.log(`  normalizedScale: ${model.userData.normalizedScale.toFixed(6)}`);
-    }
-  }
-}
-  // Model size configuration - định nghĩa kích thước chuẩn cho từng loại model
-  const modelSizeConfig = {
-      hat: 1,        // Kích thước chuẩn cho hat
-      glasses: 1.5,   // Kích thước chuẩn cho glasses
-      fallbackHat: 0.2,
-      fallbackGlasses: 0.15
-    };
-    // Enhanced function to normalize model scale and store fixed size
-  function smartNormalizeModelScale(model, targetSize = 0.2, tolerance = 0.05) {
+// Enhanced function to normalize model scale and store fixed size
+function smartNormalizeModelScale(model, targetSize = 0.2, tolerance = 0.05) {
   // Đảm bảo bounding box lấy đúng toàn bộ model (bao gồm cả con)
   model.updateMatrixWorld(true);
 
@@ -627,7 +596,7 @@ function logModelSize(model, label = 'Model') {
   // Calculate initial scale to normalize to targetSize
   let scale = targetSize / maxDim;
   
-  // 🎯 IMPORTANT: Xử lý model có kích thước gốc quá lớn HOẶC quá nhỏ
+  // IMPORTANT: Xử lý model có kích thước gốc quá lớn HOẶC quá nhỏ
   let scaleCorrection = 1.0;
   let correctionReason = "Normal size";
   
@@ -656,10 +625,8 @@ function logModelSize(model, label = 'Model') {
   const maxScale = 1000; // Giới hạn scale tối đa để tránh lỗi
   
   if (scale < minScale) {
-    console.warn(`⚠️ Scale quá nhỏ (${scale.toFixed(6)}), đặt về giá trị tối thiểu ${minScale}`);
     scale = minScale;
   } else if (scale > maxScale) {
-    console.warn(`⚠️ Scale quá lớn (${scale.toFixed(6)}), đặt về giá trị tối đa ${maxScale}`);
     scale = maxScale;
   }
 
@@ -671,17 +638,11 @@ function logModelSize(model, label = 'Model') {
   model.userData.originalMaxDim = maxDim;
   model.userData.scaleCorrection = scaleCorrection;
   model.userData.correctionReason = correctionReason;
-
-  console.log(`✅ Model chuẩn hóa: scale=${scale.toFixed(6)}, targetSize=${targetSize}, maxDim=${maxDim.toFixed(3)}`);
-  console.log(`   🔧 Scale correction: ${scaleCorrection} (${correctionReason})`);
-  console.log(`   📊 Scale ratio: ${(scale/targetSize).toFixed(2)}x`);
-  
-  logModelSize(model);
 }
 
 
     // Function to apply dynamic scaling per frame
-    function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
+function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
       if (!model || !headFit) return;
       
       // Calculate appropriate scale based on head size
@@ -700,7 +661,7 @@ function logModelSize(model, label = 'Model') {
            scaleMultiplier = 3.5;
        }
       
-      // 🎯 IMPORTANT: Sử dụng scale correction từ normalize để tránh model quá to
+      // IMPORTANT: Sử dụng scale correction từ normalize để tránh model quá to
       let correctionFactor = 1.0;
       if (model.userData && model.userData.scaleCorrection) {
         correctionFactor = model.userData.scaleCorrection;
@@ -738,11 +699,11 @@ function logModelSize(model, label = 'Model') {
           const correctionReason = model.userData.correctionReason || "Unknown";
           debugElement.innerHTML = `
             ${modelType}: headScale=${headScale.toFixed(3)}, multiplier=${scaleMultiplier.toFixed(2)}, correction=${correctionFactor.toFixed(4)}, originalMaxDim=${originalMaxDim}, final=${finalScale.toFixed(3)}
-            <br>📏 Model size: ${correctionReason}
+            <br> Model size: ${correctionReason}
           `;
         }
       }
-    }
+  }
 
     // Load the low-poly hat model
     const loader = new THREE.GLTFLoader();
@@ -759,7 +720,7 @@ function logModelSize(model, label = 'Model') {
     
     // Tạo model tạm thời ngay lập tức để test
     hatModel = createFallbackHat();
-    smartNormalizeModelScale(hatModel, modelSizeConfig.fallbackHat); // Normalize fallback model
+    smartNormalizeModelScale(hatModel); // Normalize fallback model
     hatScene.add(hatModel); // Thêm vào hatScene
     
     loader.load(
@@ -771,11 +732,10 @@ function logModelSize(model, label = 'Model') {
         hatModel = gltf.scene;
         
         // Normalize model scale to ensure consistent size across different models
-        smartNormalizeModelScale(hatModel, modelSizeConfig.hat);
+        smartNormalizeModelScale(hatModel);
         
         hatModel.rotation.set(0, 0, 0);
         hatScene.add(hatModel); // Thêm vào hatScene
-        console.log('✅ Hat model loaded and scale normalized - will use dynamic scaling per frame');
       },
       (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
       (error) => {
@@ -797,7 +757,7 @@ function logModelSize(model, label = 'Model') {
     
     // Tạo model tạm thời ngay lập tức để test
     glassesModel = createFallbackGlasses();
-    smartNormalizeModelScale(glassesModel, modelSizeConfig.fallbackGlasses); // Normalize fallback model
+    smartNormalizeModelScale(glassesModel); // Normalize fallback model
     hatScene.add(glassesModel); // Thêm vào hatScene
     
     loader.load(
@@ -809,13 +769,12 @@ function logModelSize(model, label = 'Model') {
         glassesModel = gltf.scene;
         
         // Normalize model scale to ensure consistent size across different models
-        smartNormalizeModelScale(glassesModel, modelSizeConfig.glasses);
+        smartNormalizeModelScale(glassesModel);
         
         // Apply initial rotation to fix mirror effect - flip the model 180 degrees around Y-axis
         glassesModel.rotation.set(0, 0, 0);
         // glassesModel.rotation.y = Math.PI;
         hatScene.add(glassesModel); // Thêm vào hatScene
-        console.log('✅ Glasses model loaded, scale normalized - will use dynamic scaling per frame');
       },
       (xhr) => console.log((xhr.loaded / xhr.total * 100) + '% loaded'),
       (error) => {
@@ -1274,7 +1233,7 @@ function logModelSize(model, label = 'Model') {
       }
     }
 
-    // 🎭 FACE MASK GEOMETRY FOR DEPTH MASKING
+    // FACE MASK GEOMETRY FOR DEPTH MASKING
     // Tạo geometry mặt nạ từ face landmarks để làm depth mask
     function createFaceMaskGeometry(landmarks) {
       if (!landmarks || landmarks.length < 468) {
@@ -1454,7 +1413,7 @@ function logModelSize(model, label = 'Model') {
   let threeY = -ndcY * (heightAtZ / 2);
   let threeZ = -z * 5;
 
-  // 👉 Mirror nếu cần (vì bạn đã lật canvas bằng scale(-1, 1))
+  // Mirror nếu cần (vì bạn đã lật canvas bằng scale(-1, 1))
   if (mirror) {
     threeX *= -1;
   }
@@ -1596,9 +1555,6 @@ function logModelSize(model, label = 'Model') {
       minTrackingConfidence: 0.3   // Giảm để tracking tốt hơn ở rìa màn hình
     });
 
-
-
-    
     // Hàm Main của code
     // Process FaceMesh results
     faceMesh.onResults((results) => {
@@ -1617,7 +1573,6 @@ function logModelSize(model, label = 'Model') {
           trackingLostFrames = 0; // Reset tracking lost counter
           
         for (const landmarks of results.multiFaceLandmarks) {
-          console.log('🎯 DEBUG: showMesh =', showMesh, 'landmarks found'); // DEBUG
           
                      // Draw face mesh components if enabled
            if (showMesh) {
@@ -1640,8 +1595,6 @@ function logModelSize(model, label = 'Model') {
                  { color: '#00FFFF', lineWidth: 2, circleRadius: 2 });
              }
            }
-
-          console.log('🎯 TRACKING: Starting head fit calculation'); // DEBUG
           
           // Calculate head fit and position - tracking theo forehead
           const headFit = calculateHeadFit(landmarks);
@@ -1658,9 +1611,6 @@ function logModelSize(model, label = 'Model') {
 
           // Calculate head rotation
           const headRotation = calculateHeadRotation(landmarks);
-          
-          console.log('🎯 TRACKING: Head rotation calculated', headRotation); // DEBUG
-
           // Apply smoothing to rotation
           targetRotation = headRotation;
           currentRotation = smoothRotation(targetRotation, currentRotation, smoothingFactor);
@@ -1724,7 +1674,6 @@ function logModelSize(model, label = 'Model') {
              
                          // Check if hat model exists
             if (hatModel && headFit) {
-              console.log('🎩 MODEL: Updating hat position and rotation'); // DEBUG
               
               // Calculate hybrid position: X,Z from head center, Y from forehead
               const trueHeadCenter = calculateTrueHeadCenter(landmarks);
@@ -1739,7 +1688,6 @@ function logModelSize(model, label = 'Model') {
                 if (foreheadLandmark) {
                   const foreheadPos = mapToThreeJS(foreheadLandmark.x, foreheadLandmark.y, foreheadLandmark.z, true);
                   hatPos.y = foreheadPos.y + hatYOffset; // Use configurable hat Y offset
-                  console.log('🎩 Using hybrid position: X,Z from head center, Y from forehead');
                 } else {
                   hatPos.y -= 0.05; // Fallback offset
                 }
@@ -1747,7 +1695,7 @@ function logModelSize(model, label = 'Model') {
                 // Fallback to old method
                 hatPos = mapToThreeJS(headFit.center.x, headFit.center.y, headFit.center.z + 0.08, true);
                 hatPos.y -= 0.15; // Original offset for old method
-                console.warn('⚠️ Fallback to old positioning method');
+                console.warn(' Fallback to old positioning method');
               }
 
               // Debug: Check if position is at screen edges
@@ -1755,7 +1703,7 @@ function logModelSize(model, label = 'Model') {
                               headFit.center.y < edgeTrackingSensitivity || headFit.center.y > (1 - edgeTrackingSensitivity);
               
               if (isAtEdge) {
-                console.log('⚠️ Tracking ở rìa màn hình:', {
+                console.log(' Tracking ở rìa màn hình:', {
                   x: headFit.center.x.toFixed(3),
                   y: headFit.center.y.toFixed(3),
                   z: headFit.center.z.toFixed(3)
@@ -1804,7 +1752,7 @@ function logModelSize(model, label = 'Model') {
 
   // Note: Hat rotates around head center but positioned at forehead level
 
-     // 🔵 HEAD OCCLUDER - Professional Implementation
+     // HEAD OCCLUDER - Professional Implementation
      if (headOccluder && landmarks) {
        // === helpers ===
        const v3 = (lm) => new THREE.Vector3(
@@ -1854,7 +1802,7 @@ function logModelSize(model, label = 'Model') {
          const qTarget = new THREE.Quaternion().setFromRotationMatrix(basis);
          headProxy.quaternion.slerp(qTarget, 0.35);
 
-                   // 🎯 SCALE HEAD PROXY CỐ ĐỊNH 1.2 LẦN KÍCH THƯỚC MẶT
+                   // SCALE HEAD PROXY CỐ ĐỊNH 1.2 LẦN KÍCH THƯỚC MẶT
           // Tính scale factor cố định 1.2 lần kích thước mặt
           const faceSize = (3.14 * (3*(headH + headW)/2 - Math.sqrt((3*headH+headW)*(headH+3*headD)/4))); // Lấy kích thước nhỏ nhất của mặt
           const fixedScaleFactor = faceSize * 1.1; // Luôn scale 1.2 lần
@@ -1878,7 +1826,7 @@ function logModelSize(model, label = 'Model') {
          
                    // Debug log
           if (Math.random() < 0.02) { // Log 2% frames để không spam
-            console.log('🔵 Professional Head Occluder:', {
+            console.log(' Professional Head Occluder:', {
               center: headCenter,
               scale: headOccluder.scale,
               headProxyScale: headProxy.scale,
@@ -1942,7 +1890,7 @@ function logModelSize(model, label = 'Model') {
         // ALWAYS restore canvas context in finally block to prevent mirror effect accumulation
         canvasCtx.restore();
         
-                 // 🎭 HEAD REPLACEMENT STENCIL BUFFER RENDERING
+                 // HEAD REPLACEMENT STENCIL BUFFER RENDERING
          renderWithHeadReplacement();
       }
     });
@@ -1996,7 +1944,7 @@ function logModelSize(model, label = 'Model') {
     });
 
     // Settings panel toggle
-    // 🛡️ SAFE SETTINGS CONTROLS
+    // SAFE SETTINGS CONTROLS
     safeAddEventListener('settings-toggle', 'click', () => {
       const panel = document.getElementById('settings-panel');
       if (panel) {
@@ -2024,13 +1972,7 @@ function logModelSize(model, label = 'Model') {
         saveSettings();
       }, 1000); // Save after 1 second of no changes
     }
-
-
-
-
-
-
-    // 🛡️ SAFE SMOOTHING CONTROL
+    // SAFE SMOOTHING CONTROL
     safeAddEventListener('smoothing', 'input', (e) => {
       smoothingFactor = parseFloat(e.target.value);
       const smoothingValue = document.getElementById('smoothing-value');
@@ -2039,12 +1981,7 @@ function logModelSize(model, label = 'Model') {
       }
       autoSaveSettings();
     });
-
-
-
-
-
-    // 🛡️ SAFE MESH CONTROLS
+    // SAFE MESH CONTROLS
     safeAddEventListener('show-mesh', 'change', (e) => {
       showMesh = e.target.checked;
       autoSaveSettings();
@@ -2070,7 +2007,7 @@ function logModelSize(model, label = 'Model') {
       autoSaveSettings();
     });
 
-    // 🛡️ SAFE DEPTH MASKING CONTROLS  
+    // SAFE DEPTH MASKING CONTROLS  
     safeAddEventListener('enable-depth-mask', 'change', (e) => {
       enableDepthMask = e.target.checked;
       autoSaveSettings();
@@ -2110,7 +2047,7 @@ function logModelSize(model, label = 'Model') {
       autoSaveSettings();
     });
 
-    // 🛡️ SAFE REMAINING CONTROLS
+    // SAFE REMAINING CONTROLS
     safeAddEventListener('edge-tracking', 'input', (e) => {
       edgeTrackingSensitivity = parseFloat(e.target.value);
       const edgeTrackingValue = document.getElementById('edge-tracking-value');
@@ -2139,15 +2076,7 @@ function logModelSize(model, label = 'Model') {
       }
       autoSaveSettings();
     });
-       
-    // 🎉 Setup completed
-    console.log('✅ Setup hoàn tất!');
-    // Remove loading indicator
-    const loadingEl = document.getElementById('loading');
-    if (loadingEl) loadingEl.remove();
-    
     } // End of initApp function
-    
  </script>
 </body>
 </html>
