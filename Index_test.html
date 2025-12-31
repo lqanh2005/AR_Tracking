@@ -74,6 +74,7 @@
   </div>
   
   <button id="settings-toggle">⚙️</button>
+  <button id="camera-toggle" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: white; border: none; padding: 10px; border-radius: 50%; cursor: pointer; font-size: 16px; z-index: 1000;">📹</button>
   
   <div id="settings-panel">
     <h4> Điều chỉnh Mũ</h4>
@@ -186,8 +187,6 @@
     });
     
     function initApp() {
-      // Loading indicator
-      document.body.innerHTML += '<div id="loading" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:white; padding:20px; border-radius:10px; z-index:9999;">🔄 Đang tải...</div>';
       
       function safeAddEventListener(elementId, event, callback) {
         const element = document.getElementById(elementId);
@@ -1341,63 +1340,8 @@ function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
         }
       }
     }
-
-    // Function to map normalized screen coordinates to Three.js world coordinates using camera unprojection
-    function mapToThreeJSWorld(xNorm, yNorm, camera, depth = -2.5) {
-      // xNorm, yNorm: [0..1] → screen space (MediaPipe)
-      // Convert từ [0..1] về [-1..1] để dùng ray
-      const x = (xNorm - 0.5) * 2;
-      const y = -(yNorm - 0.5) * 2;
-
-      // Tạo ray từ camera qua màn hình
-      const vector = new THREE.Vector3(x, y, 0.5);
-      vector.unproject(camera);
-
-     // Ray đi từ camera đến vector
-      const dir = vector.sub(camera.position).normalize();
-
-      // Tính điểm trên ray tại z = depth
-      const distance = (depth - camera.position.z) / dir.z;
-      const pos = camera.position.clone().add(dir.multiplyScalar(distance));
-
-      return pos;
-  }
-
-  // bởi vị dùng clamped Math nên nó bị giới hạn vị trí từ 0 đến 1, ở rìa thì nó lớn hơn 1 nên phải chỉnh lại
-  function oldMapToThreeJS(x, y, z) {
-      // Clamp coordinates to prevent extreme values at screen edges
-      const clampedX = Math.max(0, Math.min(1, x));
-      const clampedY = Math.max(0, Math.min(1, y));
-      const clampedZ = Math.max(-1, Math.min(1, z));
-      
-      // Map to Three.js coordinate system
-      const threeX = -(clampedX * 1280 - 640) / 1280 * 3;
-      const threeY = -(clampedY * 720 - 360) / 720 * 3;
-      const threeZ = -clampedZ * 1000 / 200;
-      
-      // Add small smoothing for edge positions to prevent jitter
-      const edgeThreshold = 0.1; // 10% from edge
-      let smoothedX = threeX;
-      let smoothedY = threeY;
-      
-      if (clampedX < edgeThreshold || clampedX > (1 - edgeThreshold)) {
-        // Apply slight smoothing at edges
-        smoothedX = threeX * 0.95;
-      }
-      if (clampedY < edgeThreshold || clampedY > (1 - edgeThreshold)) {
-        // Apply slight smoothing at edges
-        smoothedY = threeY * 0.95;
-      }
-      
-      return {
-        x: smoothedX,
-        y: smoothedY,
-        z: threeZ
-      };
-    }
-
-    // Function to map 2D coordinates to Three.js coordinates with edge handling
-    function mapToThreeJS(x, y, z, mirror = true) {
+// Function to map 2D coordinates to Three.js coordinates with edge handling
+function mapToThreeJS(x, y, z, mirror = true) {
   const aspect = 1280 / 720;
   const fov = 45;
   const depth = 5;
@@ -1924,7 +1868,47 @@ function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
     document.getElementById('head-proxy-scale-sensitivity').value = headProxyScaleSensitivity;
     document.getElementById('head-proxy-scale-sensitivity-value').textContent = headProxyScaleSensitivity.toFixed(1);
 
-    // Start the camera
+    // Hàm để lấy danh sách camera và chọn camera laptop
+    async function getCameraDevices() {
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        
+        console.log('📹 Danh sách camera có sẵn:');
+        videoDevices.forEach((device, index) => {
+          console.log(`${index}: ${device.label || 'Camera không tên'} (${device.deviceId})`);
+        });
+        
+        // Tìm camera laptop (thường có label chứa "webcam", "built-in", hoặc không có label)
+        let laptopCameraId = null;
+        for (const device of videoDevices) {
+          const label = device.label.toLowerCase();
+          if (label.includes('webcam') || 
+              label.includes('built-in') || 
+              label.includes('integrated') ||
+              label.includes('laptop') ||
+              !device.label || // Camera không có label thường là camera laptop
+              device.label === '') {
+            laptopCameraId = device.deviceId;
+            console.log('🎯 Chọn camera laptop:', device.label || 'Camera không tên');
+            break;
+          }
+        }
+        
+        // Nếu không tìm thấy camera laptop, chọn camera đầu tiên
+        if (!laptopCameraId && videoDevices.length > 0) {
+          laptopCameraId = videoDevices[0].deviceId;
+          console.log('⚠️ Không tìm thấy camera laptop, chọn camera đầu tiên:', videoDevices[0].label);
+        }
+        
+        return laptopCameraId;
+      } catch (error) {
+        console.error('Lỗi khi lấy danh sách camera:', error);
+        return null;
+      }
+    }
+
+    // Start the camera với chỉ định camera cụ thể
     const cameraFeed = new Camera(videoElement, {
       onFrame: async () => {
         try {
@@ -1937,10 +1921,87 @@ function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
       height: 720
     });
     
-    // Start camera with error handling
-    cameraFeed.start().catch(error => {
-      console.error('Error starting camera:', error);
-      alert('Không thể khởi động camera. Vui lòng kiểm tra quyền truy cập camera.');
+    // Khởi động camera với camera laptop được chọn
+    async function startLaptopCamera() {
+      try {
+        const laptopCameraId = await getCameraDevices();
+        
+        const cameraConstraints = {
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            deviceId: laptopCameraId ? { exact: laptopCameraId } : undefined
+          }
+        };
+        
+        console.log('🚀 Đang khởi động camera laptop...');
+        await cameraFeed.start(cameraConstraints);
+        console.log('✅ Camera laptop đã khởi động thành công!');
+        
+      } catch (error) {
+        console.error('❌ Lỗi khởi động camera laptop:', error);
+        
+        // Fallback: thử khởi động camera mặc định
+        try {
+          console.log('🔄 Thử khởi động camera mặc định...');
+          await cameraFeed.start();
+          console.log('✅ Camera mặc định đã khởi động!');
+        } catch (fallbackError) {
+          console.error('❌ Không thể khởi động camera:', fallbackError);
+          alert('Không thể khởi động camera. Vui lòng kiểm tra quyền truy cập camera và đảm bảo bạn đang sử dụng laptop.');
+        }
+      }
+    }
+    
+    // Khởi động camera laptop
+    startLaptopCamera();
+
+    // Camera toggle functionality
+    let currentCameraIndex = 0;
+    let availableCameras = [];
+    
+    safeAddEventListener('camera-toggle', 'click', async () => {
+      try {
+        // Lấy danh sách camera
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        availableCameras = devices.filter(device => device.kind === 'videoinput');
+        
+        if (availableCameras.length <= 1) {
+          alert('Chỉ có 1 camera có sẵn.');
+          return;
+        }
+        
+        // Chuyển sang camera tiếp theo
+        currentCameraIndex = (currentCameraIndex + 1) % availableCameras.length;
+        const selectedCamera = availableCameras[currentCameraIndex];
+        
+        console.log(`🔄 Chuyển sang camera: ${selectedCamera.label || 'Camera không tên'}`);
+        
+        // Dừng camera hiện tại
+        if (cameraFeed && cameraFeed.video) {
+          cameraFeed.video.srcObject.getTracks().forEach(track => track.stop());
+        }
+        
+        // Khởi động camera mới
+        const cameraConstraints = {
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            deviceId: { exact: selectedCamera.deviceId }
+          }
+        };
+        
+        await cameraFeed.start(cameraConstraints);
+        console.log(`✅ Đã chuyển sang camera: ${selectedCamera.label || 'Camera không tên'}`);
+        
+        // Hiển thị thông báo
+        const cameraName = selectedCamera.label || `Camera ${currentCameraIndex + 1}`;
+        alert(`📹 Đã chuyển sang: ${cameraName}`);
+        
+      } catch (error) {
+        console.error('❌ Lỗi chuyển camera:', error);
+        alert('Không thể chuyển camera. Vui lòng thử lại.');
+      }
     });
 
     // Settings panel toggle
@@ -2076,7 +2137,7 @@ function applyDynamicScalePerFrame(model, headFit, modelType = 'hat') {
       }
       autoSaveSettings();
     });
-    } // End of initApp function
+    }
  </script>
 </body>
 </html>
